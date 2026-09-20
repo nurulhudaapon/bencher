@@ -1,0 +1,294 @@
+name: bench
+
+on:
+  schedule:
+    # Weekly Sunday 06:00 UTC
+    - cron: "0 6 * * 0"
+  push:
+    branches: [main]
+    paths:
+      - "bench/**"
+      - "frameworks/**"
+      - ".github/workflows/bench.yml"
+      - ".github/workflows/cd.yml"
+  pull_request:
+    paths:
+      - "bench/**"
+      - "frameworks/**"
+      - ".github/workflows/**"
+  # Run from any branch via Actions → bench → Run workflow (deploy still main-only).
+  workflow_dispatch:
+    inputs:
+      frameworks:
+        description: "Frameworks to benchmark (space-separated, default: all)"
+        required: false
+        default: ""
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build (${{ matrix.os.name }} / ${{ matrix.image }})
+    runs-on: ${{ matrix.os.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [httpz, zap, zzz, zinc, std, bencher]
+        os:
+          - name: linux-x86_64
+            runner: ubuntu-latest
+          - name: linux-aarch64
+            runner: ubuntu-24.04-arm
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check if image is selected
+        id: check
+        run: |
+          INPUT="${{ github.event.inputs.frameworks }}"
+          IMG="${{ matrix.image }}"
+          # Always build bencher; otherwise honor optional frameworks filter.
+          if [ -z "$INPUT" ] || [ "$IMG" = "bencher" ] || echo "$INPUT" | grep -qw "$IMG"; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/checkout@v4
+
+      - name: Resolve Dockerfile / tag
+        if: steps.check.outputs.skip == 'false'
+        id: meta
+        run: |
+          if [ "${{ matrix.image }}" = "bencher" ]; then
+            echo "file=bench/Dockerfile.bench" >> "$GITHUB_OUTPUT"
+            echo "tag=zig_web_bench-bencher" >> "$GITHUB_OUTPUT"
+          else
+            echo "file=frameworks/${{ matrix.image }}/Dockerfile" >> "$GITHUB_OUTPUT"
+            echo "tag=zig_web_bench-${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.skip == 'false'
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+
+      - name: Build ${{ matrix.image }}
+        if: steps.check.outputs.skip == 'false'
+        uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_SUMMARY: false
+        with:
+          context: .
+          file: ${{ steps.meta.outputs.file }}
+          load: true
+          tags: ${{ steps.meta.outputs.tag }}:latest
+          cache-from: type=gha,scope=${{ matrix.os.name }}-${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.os.name }}-${{ matrix.image }}
+
+      - name: Export image as tarball
+        if: steps.check.outputs.skip == 'false'
+        run: docker save "${{ steps.meta.outputs.tag }}:latest" | gzip > "/tmp/${{ matrix.image }}.tar.gz"
+
+      - name: Upload image artifact
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/upload-artifact@v5
+        with:
+          name: image-${{ matrix.os.name }}-${{ matrix.image }}
+          path: /tmp/${{ matrix.image }}.tar.gz
+          retention-days: 1
+
+  bench:
+    name: bench (${{ matrix.platform }})
+    needs: [build]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux-x86_64
+          - runner: ubuntu-24.04-arm
+            platform: linux-aarch64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          # Host orchestrator (bench/src) uses Zig 0.17 process.Init / Io APIs.
+          version: 0.17.0-dev.2131+d08989840
+
+      - name: Download image artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: image-${{ matrix.platform }}-*
+          path: /tmp/images
+          merge-multiple: true
+
+      - name: Load Docker images
+        run: |
+          shopt -s nullglob
+          files=(/tmp/images/*.tar.gz)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No image tarballs for ${{ matrix.platform }}"
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            echo "Loading $f"
+            docker load < "$f"
+          done
+          docker images 'zig_web_bench-*'
+
+      - name: Docker info
+        run: |
+          docker version
+          uname -a
+
+      - name: Run benchmarks
+        env:
+          BENCH_PLATFORM: ${{ matrix.platform }}
+          BENCH_SKIP_BUILD: "1"
+          DOCKER_BUILDKIT: "1"
+        run: |
+          cd bench
+          if [ -n "${{ github.event.inputs.frameworks }}" ]; then
+            zig build run -- ${{ github.event.inputs.frameworks }}
+          else
+            zig build run
+          fi
+
+      - name: List platform partials
+        if: always()
+        run: ls -la app/.bench-*-${{ matrix.platform }}.tsv || true
+
+      - name: Upload platform partials
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: bench-partials-${{ matrix.platform }}
+          path: app/.bench-*-${{ matrix.platform }}.tsv
+          # Partials are dotfiles (.bench-*.tsv); excluded by default since v4.4.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  merge:
+    name: merge results
+    needs: [bench]
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all platform partials
+        uses: actions/download-artifact@v5
+        with:
+          pattern: bench-partials-*
+          path: _partials
+          merge-multiple: false
+
+      - name: Collect partials into app/
+        run: |
+          mkdir -p app
+          find _partials -type f -name '.bench-*.tsv' -print -exec cp -v {} app/ \;
+          ls -la app/.bench-*.tsv || {
+            echo "No platform partials found — cannot merge"
+            exit 1
+          }
+
+      - name: Download bencher image
+        uses: actions/download-artifact@v5
+        with:
+          name: image-linux-x86_64-bencher
+          path: /tmp/images
+
+      - name: Load bencher image
+        run: |
+          docker load < /tmp/images/bencher.tar.gz
+          docker images 'zig_web_bench-bencher'
+
+      - name: Merge results.zon
+        run: |
+          docker run --rm \
+            -v "$(pwd)/app:/out" \
+            zig_web_bench-bencher:latest --merge /out/results.zon
+          test -f app/results.zon
+          head -40 app/results.zon
+
+      - name: Print results table to summary
+        run: |
+          {
+            echo "## Benchmark Results"
+            echo ""
+            echo "| Framework | Platform | Scenario | Req/s | P50 (ms) | P99 (ms) | Success |"
+            echo "|-----------|----------|----------|------:|---------:|---------:|--------:|"
+
+            shopt -s nullglob
+            for f in app/.bench-*.tsv; do
+              base=$(basename "$f" .tsv)
+              rest=${base#.bench-}
+              platform=""
+              fw=""
+              for pl in linux-x86_64 linux-aarch64 macos-x86_64 macos-aarch64 windows-x86_64 windows-aarch64; do
+                case "$rest" in
+                  *-"$pl")
+                    fw=${rest%-"$pl"}
+                    platform=$pl
+                    break
+                    ;;
+                esac
+              done
+              if [ -z "$platform" ]; then
+                echo "Skipping unrecognized partial: $f" >&2
+                continue
+              fi
+
+              while IFS=$'\t' read -r col_fw scenario rps _avg _fast _slow success p50 _p95 p99 _rest; do
+                [ -z "${col_fw:-}" ] && continue
+                fw_label=${col_fw:-$fw}
+                p50_ms=$(awk -v v="$p50" 'BEGIN { printf "%.2f", v * 1000 }')
+                p99_ms=$(awk -v v="$p99" 'BEGIN { printf "%.2f", v * 1000 }')
+                rps_i=$(awk -v v="$rps" 'BEGIN { printf "%.0f", v }')
+                success_pct=$(awk -v v="$success" 'BEGIN { printf "%.1f%%", v * 100 }')
+                printf "| %s | %s | %s | %s | %s | %s | %s |\n" \
+                  "$fw_label" "$platform" "$scenario" "$rps_i" "$p50_ms" "$p99_ms" "$success_pct"
+              done < "$f"
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload merged results
+        uses: actions/upload-artifact@v5
+        with:
+          name: results-zon
+          path: app/results.zon
+          retention-days: 30
+
+  deploy:
+    name: deploy pages
+    needs: [merge]
+    if: github.ref == 'refs/heads/main' && needs.merge.result == 'success'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/cd.yml
+    with:
+      results_artifact: results-zon

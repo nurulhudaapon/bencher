@@ -37,7 +37,14 @@ pub fn main(init: std.process.Init) !void {
     std.log.info("compose:    {s}", .{compose_path});
     std.log.info("output:     {s}", .{out_zon});
 
-    {
+    // CI pre-builds images with Buildx/GHA cache, then sets BENCH_SKIP_BUILD=1.
+    const skip_build = if (init.environ_map.get("BENCH_SKIP_BUILD")) |v|
+        v.len > 0 and !std.mem.eql(u8, v, "0") and !std.mem.eql(u8, v, "false")
+    else
+        false;
+    if (skip_build) {
+        std.log.info("BENCH_SKIP_BUILD set — using preloaded images", .{});
+    } else {
         var cmd: std.ArrayList([]const u8) = .empty;
         try cmd.appendSlice(arena, &.{ "docker", "compose", "-f", compose_path, "build" });
         try cmd.appendSlice(arena, frameworks);

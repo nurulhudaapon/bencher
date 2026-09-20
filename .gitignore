@@ -1,4 +1,5 @@
 zig-out/
+dist/
 .zig-cache/
 zig-pkg/
 static
