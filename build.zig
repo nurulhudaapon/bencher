@@ -21,7 +21,6 @@ pub fn build(b: *std.Build) !void {
                     .build = .enabled,
                     .install_subdir = "bindings",
                 },
-                .wasm = .disabled,
             },
         },
     });

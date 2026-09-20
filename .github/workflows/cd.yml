@@ -47,6 +47,8 @@ jobs:
         uses: mlugg/setup-zig@v2
         with:
           version: 0.17.0-dev.2131+d08989840
+          cache-size-limit: 0
+          use-tool-cache: true
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
