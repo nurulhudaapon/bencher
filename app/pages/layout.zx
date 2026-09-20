@@ -4,10 +4,10 @@ pub fn Layout(ctx: zx.LayoutContext, children: zx.Component) zx.Component {
             <head>
                 <meta charset="utf-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
-                <meta name="description" content="Performance comparison of popular Zig web frameworks including httpz, zap, zzz, zinc, and std.http." />
+                <meta name="description" content="Performance comparison of popular Zig Web Servers including httpz, zap, zzz, zinc, and std.http." />
                 <meta name="keywords" content="zig, web frameworks, benchmark, performance, httpz, zap, std, zzz, zinc" />
                 <meta name="author" content="Nurul Huda (Apon)" />
-                <title>Zig Web Frameworks Benchmark</title>
+                <title>Zig Web Servers Benchmark</title>
                 <link rel="icon" href="favicon.svg" type="image/svg+xml" />
                 <style @escaping={.none}>{@embedFile("../assets/styles.css")}</style>            </head>
             <body>

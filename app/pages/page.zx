@@ -631,7 +631,7 @@ pub fn Page(ctx: zx.PageContext) !zx.Component {
                 <div class="header">
                     <div class="header-title">
                         <ZigLogo />
-                        Zig Web Frameworks
+                        Zig Web Servers
                     </div>
                     <div class="header-actions">
                         <a class="github-info" href="https://github.com/nurulhudaapon/bench-zig-web-frameworks" target="_blank" rel="noopener noreferrer" aria-label="GitHub repository">
@@ -646,7 +646,7 @@ pub fn Page(ctx: zx.PageContext) !zx.Component {
                             />
                         </a>
                         <div class="website-url" hidden>
-                            <span>zigweb.nuhu.dev</span>
+                            <span>bench.zig.bd</span>
                         </div>
                     </div>
                 </div>
