@@ -1,0 +1,68 @@
+const FeatureRow = View.FeatureRow;
+const Category = View.Category;
+const FrameworkMeta = View.FrameworkMeta;
+
+fn FeatureRowView(allocator: zx.Allocator, props: struct { row: FeatureRow }) zx.Component {
+    return (
+        <tr @allocator={allocator} class="feature-row">
+            <td>
+                <div class="feature-name">{props.row.name}</div>
+                <div class="feature-desc">{props.row.description}</div>
+            </td>
+            {for (props.row.cells) |cell| (
+                <td class="cell">
+                    <div class="cell-inner">
+                        <StatusIcon status={cell.status} />
+                        <span class="cell-value">{cell.value}</span>
+                    </div>
+                </td>
+            )}
+        </tr>
+    );
+}
+
+fn CategoryView(allocator: zx.Allocator, props: struct { category: Category, colspan: []const u8 }) zx.Component {
+    return (
+        <fragment @allocator={allocator}>
+            <tr class="category-row">
+                <td colspan={props.colspan}>
+                    <h3 class="category-title">{props.category.name}</h3>
+                    <p class="category-desc">{props.category.description}</p>
+                </td>
+            </tr>
+            {for (props.category.features) |row| (
+                <FeatureRowView row={row} />
+            )}
+        </fragment>
+    );
+}
+
+pub fn ComparisonTable(allocator: zx.Allocator, props: struct {
+    frameworks: []const FrameworkMeta,
+    categories: []const Category,
+    colspan: []const u8,
+}) zx.Component {
+    return (
+        <div @allocator={allocator} class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Feature</th>
+                        {for (props.frameworks) |fw| (
+                            <th class="center">{fw.name}</th>
+                        )}
+                    </tr>
+                </thead>
+                <tbody>
+                    {for (props.categories) |category| (
+                        <CategoryView category={category} colspan={props.colspan} />
+                    )}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+const zx = @import("zx");
+const View = @import("../View.zig");
+const StatusIcon = @import("./status_icon.zx").StatusIcon;

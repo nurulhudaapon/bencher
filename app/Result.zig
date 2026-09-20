@@ -5,9 +5,7 @@ const std = @import("std");
 meta: Meta = .{},
 scenarios: []const Scenario = &.{},
 platforms: []const Platform = &.{},
-frameworks: []const Framework = &.{},
 runs: []const Run = &.{},
-comparison: []const Category = &.{},
 
 pub const Config = struct {
     runs: u32 = 0,
@@ -50,12 +48,6 @@ pub const Platform = struct {
     label: []const u8 = "",
 };
 
-pub const Framework = struct {
-    name: []const u8 = "",
-    version: []const u8 = "",
-    repo_url: []const u8 = "",
-};
-
 pub const Run = struct {
     framework: []const u8 = "",
     scenario: []const u8 = "",
@@ -74,27 +66,6 @@ pub const Run = struct {
     requests: u64 = 0,
 };
 
-pub const FeatureCell = struct {
-    value: []const u8 = "—",
-    status: []const u8 = "error",
-};
-
-pub const Feature = struct {
-    name: []const u8 = "",
-    description: []const u8 = "",
-    zap: FeatureCell = .{},
-    httpz: FeatureCell = .{},
-    zzz: FeatureCell = .{},
-    zinc: FeatureCell = .{},
-    std: FeatureCell = .{},
-};
-
-pub const Category = struct {
-    category: []const u8 = "",
-    description: []const u8 = "",
-    features: []const Feature = &.{},
-};
-
 /// Candidate locations of the bencher output, relative to the process cwd.
 const search_paths = [_][]const u8{ "app/results.zon", "results.zon" };
 
@@ -108,14 +79,4 @@ pub fn readResultsFile(allocator: std.mem.Allocator, io: std.Io) ![:0]u8 {
 
 pub fn parseResults(allocator: std.mem.Allocator, source: [:0]const u8) !Result {
     return std.zon.parse.fromSliceAlloc(Result, allocator, source, null, .{ .ignore_unknown_fields = true });
-}
-
-/// Looks up the comparison cell of `feature` belonging to the framework `fw_name`.
-pub fn cellFor(feature: Feature, fw_name: []const u8) FeatureCell {
-    inline for (@typeInfo(Feature).@"struct".field_names) |name| {
-        if (comptime !std.mem.eql(u8, name, "name") and !std.mem.eql(u8, name, "description")) {
-            if (std.mem.eql(u8, name, fw_name)) return @field(feature, name);
-        }
-    }
-    return .{};
 }

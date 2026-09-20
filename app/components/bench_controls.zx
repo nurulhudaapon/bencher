@@ -1,0 +1,70 @@
+const Scenario = View.Scenario;
+const SwitchOption = View.SwitchOption;
+
+pub fn BenchControls(allocator: zx.Allocator, props: struct {
+    scenarios: []const Scenario,
+    available_os: []const SwitchOption,
+    available_arch: []const SwitchOption,
+    initial_scenario_id: []const u8,
+    default_os: []const u8,
+    default_arch: []const u8,
+}) zx.Component {
+    return (
+        <div @allocator={allocator} class="bench-controls export-chrome">
+            <div class="control-row" aria-label="Test kind">
+                <div class="seg" role="group" aria-label="Test kind">
+                    {for (props.scenarios) |sc| (
+                        <button
+                            type="button"
+                            class={if (std.mem.eql(u8, sc.id, props.initial_scenario_id)) "seg-btn seg-btn-active" else "seg-btn"}
+                            data-scenario-tab={sc.id}
+                            aria-pressed={if (std.mem.eql(u8, sc.id, props.initial_scenario_id)) "true" else "false"}
+                        >
+                            {sc.label}
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            <div class="control-row" aria-label="Platform">
+                <div class="plat-pill" role="group" aria-label="OS and architecture">
+                    <div class="plat-side plat-os">
+                        <span class="plat-current" data-os-current>{View.osLabel(props.default_os)}</span>
+                        <div class="plat-menu" role="group" aria-label="Operating system">
+                            {for (props.available_os) |opt| (
+                                <button
+                                    type="button"
+                                    class={if (std.mem.eql(u8, opt.id, props.default_os)) "plat-opt plat-opt-active" else "plat-opt"}
+                                    data-os-btn={opt.id}
+                                    aria-pressed={if (std.mem.eql(u8, opt.id, props.default_os)) "true" else "false"}
+                                >
+                                    {opt.label}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                    <span class="plat-slash" aria-hidden="true">{"/"}</span>
+                    <div class="plat-side plat-arch">
+                        <span class="plat-current" data-arch-current>{View.archLabel(props.default_arch)}</span>
+                        <div class="plat-menu" role="group" aria-label="CPU architecture">
+                            {for (props.available_arch) |opt| (
+                                <button
+                                    type="button"
+                                    class={if (std.mem.eql(u8, opt.id, props.default_arch)) "plat-opt plat-opt-active" else "plat-opt"}
+                                    data-arch-btn={opt.id}
+                                    aria-pressed={if (std.mem.eql(u8, opt.id, props.default_arch)) "true" else "false"}
+                                >
+                                    {opt.label}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+const std = @import("std");
+const zx = @import("zx");
+const View = @import("../View.zig");

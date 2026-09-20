@@ -192,15 +192,15 @@ jobs:
 
       - name: List framework partial
         if: always() && steps.check.outputs.skip == 'false'
-        run: ls -la "app/.bench-${{ matrix.framework }}-${{ matrix.os.name }}.tsv" || true
+        run: ls -la "app/.bench-${{ matrix.framework }}-${{ matrix.os.name }}.zon" || true
 
       - name: Upload framework partial
         if: always() && steps.check.outputs.skip == 'false'
         uses: actions/upload-artifact@v5
         with:
           name: bench-partials-${{ matrix.os.name }}-${{ matrix.framework }}
-          path: app/.bench-${{ matrix.framework }}-${{ matrix.os.name }}.tsv
-          # Partials are dotfiles (.bench-*.tsv); excluded by default since v4.4.
+          path: app/.bench-${{ matrix.framework }}-${{ matrix.os.name }}.zon
+          # Partials are dotfiles (.bench-*.zon); excluded by default since v4.4.
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
@@ -228,8 +228,8 @@ jobs:
       - name: Collect partials into app/
         run: |
           mkdir -p app
-          find _partials -type f -name '.bench-*.tsv' -print -exec cp -v {} app/ \;
-          ls -la app/.bench-*.tsv || {
+          find _partials -type f -name '.bench-*.zon' -print -exec cp -v {} app/ \;
+          ls -la app/.bench-*.zon || {
             echo "No platform partials found — cannot merge"
             exit 1
           }
@@ -255,44 +255,35 @@ jobs:
 
       - name: Print results table to summary
         run: |
-          {
-            echo "## Benchmark Results"
-            echo ""
-            echo "| Framework | Platform | Scenario | Req/s | P50 (ms) | P99 (ms) | Success |"
-            echo "|-----------|----------|----------|------:|---------:|---------:|--------:|"
+          python3 <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import re
+          from pathlib import Path
 
-            shopt -s nullglob
-            for f in app/.bench-*.tsv; do
-              base=$(basename "$f" .tsv)
-              rest=${base#.bench-}
-              platform=""
-              fw=""
-              for pl in linux-x86_64 linux-aarch64 macos-x86_64 macos-aarch64 windows-x86_64 windows-aarch64; do
-                case "$rest" in
-                  *-"$pl")
-                    fw=${rest%-"$pl"}
-                    platform=$pl
-                    break
-                    ;;
-                esac
-              done
-              if [ -z "$platform" ]; then
-                echo "Skipping unrecognized partial: $f" >&2
-                continue
-              fi
+          text = Path("app/results.zon").read_text()
+          print("## Benchmark Results")
+          print()
+          print("| Framework | Platform | Scenario | Req/s | P50 (ms) | P99 (ms) | Success |")
+          print("|-----------|----------|----------|------:|---------:|---------:|--------:|")
 
-              while IFS=$'\t' read -r col_fw scenario rps _avg _fast _slow success p50 _p95 p99 _rest; do
-                [ -z "${col_fw:-}" ] && continue
-                fw_label=${col_fw:-$fw}
-                p50_ms=$(awk -v v="$p50" 'BEGIN { printf "%.2f", v * 1000 }')
-                p99_ms=$(awk -v v="$p99" 'BEGIN { printf "%.2f", v * 1000 }')
-                rps_i=$(awk -v v="$rps" 'BEGIN { printf "%.0f", v }')
-                success_pct=$(awk -v v="$success" 'BEGIN { printf "%.1f%%", v * 100 }')
-                printf "| %s | %s | %s | %s | %s | %s | %s |\n" \
-                  "$fw_label" "$platform" "$scenario" "$rps_i" "$p50_ms" "$p99_ms" "$success_pct"
-              done < "$f"
-            done
-          } | tee -a "$GITHUB_STEP_SUMMARY"
+          for m in re.finditer(
+              r'\.framework = "(?P<fw>[^"]+)".*?'
+              r'\.scenario = "(?P<sc>[^"]+)".*?'
+              r'\.platform = "(?P<pl>[^"]+)".*?'
+              r'\.rps = (?P<rps>[0-9.]+).*?'
+              r'\.success_rate = (?P<ok>[0-9.]+).*?'
+              r'\.latency_p50 = (?P<p50>[0-9.]+).*?'
+              r'\.latency_p99 = (?P<p99>[0-9.]+)',
+              text,
+              re.S,
+          ):
+              p50_ms = float(m["p50"]) * 1000
+              p99_ms = float(m["p99"]) * 1000
+              success = float(m["ok"]) * 100
+              print(
+                  f"| {m['fw']} | {m['pl']} | {m['sc']} | "
+                  f"{float(m['rps']):.0f} | {p50_ms:.2f} | {p99_ms:.2f} | {success:.1f}% |"
+              )
+          PY
 
       - name: Upload merged results
         uses: actions/upload-artifact@v5

@@ -1,0 +1,52 @@
+const Panel = View.Panel;
+
+pub fn ChartPanel(allocator: zx.Allocator, props: struct { panel: Panel }) zx.Component {
+    const panel = props.panel;
+    const class = if (panel.active) "chart-panel chart-panel-active" else "chart-panel";
+    const title = std.fmt.allocPrint(allocator, "HTTP requests per second · {s}", .{panel.scenario.label}) catch unreachable;
+    const panel_id = std.fmt.allocPrint(allocator, "panel-{s}-{s}", .{ panel.scenario.id, panel.platform.id }) catch unreachable;
+
+    if (panel.frameworks.len == 0) {
+        return (
+            <div
+                @allocator={allocator}
+                class={class}
+                id={panel_id}
+                data-scenario={panel.scenario.id}
+                data-platform={panel.platform.id}
+                hidden={!panel.active}
+            >
+                <h2 class="chart-title">{title}</h2>
+                <div class="chart-empty">
+                    <p class="chart-empty-title">No results yet</p>
+                    <p class="chart-empty-desc">This scenario is configured for future runs. Re-run the Docker bench once the endpoint is implemented.</p>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div
+            @allocator={allocator}
+            class={class}
+            id={panel_id}
+            data-scenario={panel.scenario.id}
+            data-platform={panel.platform.id}
+            hidden={!panel.active}
+        >
+            <h2 class="chart-title">{title}</h2>
+            <div class="chart-inner">
+                <div class="bars">
+                    {for (panel.frameworks, 0..) |fw, i| (
+                        <BarColumn fw={fw} index={i} />
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+const std = @import("std");
+const zx = @import("zx");
+const View = @import("../View.zig");
+const BarColumn = @import("./bar_column.zx").BarColumn;

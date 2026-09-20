@@ -8,20 +8,6 @@ const zrk = @import("zrk");
 
 const fig = @import("benchfig.zon");
 
-const FrameworkMeta = struct {
-    name: []const u8,
-    version: []const u8,
-    repo_url: []const u8,
-};
-
-const framework_meta = [_]FrameworkMeta{
-    .{ .name = "zap", .version = "0.11.0", .repo_url = "https://github.com/zigzap/zap" },
-    .{ .name = "httpz", .version = "master", .repo_url = "https://github.com/karlseguin/http.zig" },
-    .{ .name = "zzz", .version = "0.3.2", .repo_url = "https://github.com/tardy-org/zzz" },
-    .{ .name = "zinc", .version = "0.3.0-beta.1", .repo_url = "https://github.com/zon-dev/zinc" },
-    .{ .name = "std", .version = "0.16.0", .repo_url = "https://github.com/ziglang/zig" },
-};
-
 const ScenarioResult = struct {
     framework: []const u8,
     scenario: []const u8,
@@ -141,7 +127,7 @@ fn mainInner(init: std.process.Init) !void {
                 });
                 // Persist what we have so a wedged server does not discard earlier scenarios.
                 if (results.items.len > 0) {
-                    try writePartialTsv(gpa, io, init.environ_map, out_path, results.items);
+                    try writePartial(gpa, io, init.environ_map, out_path, results.items);
                     std.log.info("wrote partial for {s} ({d} runs)", .{ fw, results.items.len });
                 }
                 return err;
@@ -172,20 +158,116 @@ fn mainInner(init: std.process.Init) !void {
         }
     }
 
-    // Per-framework partial TSV while zio is live; final results.zon from --merge.
-    try writePartialTsv(gpa, io, init.environ_map, out_path, results.items);
+    // Per-framework+platform partial while zio is live; final results.zon from --merge.
+    try writePartial(gpa, io, init.environ_map, out_path, results.items);
     std.log.info("wrote partial for {s} ({d} runs)", .{
         if (results.items.len > 0) results.items[0].framework else "?",
         results.items.len,
     });
 }
 
+/// Same shape as a `results.zon` run entry — used for intermediate sidecars.
+const PartialRun = struct {
+    framework: []const u8 = "",
+    scenario: []const u8 = "",
+    platform: []const u8 = "",
+    rps: f64 = 0,
+    average: f64 = 0,
+    fastest: f64 = 0,
+    slowest: f64 = 0,
+    success_rate: f64 = 0,
+    latency_p50: f64 = 0,
+    latency_p95: f64 = 0,
+    latency_p99: f64 = 0,
+    achieved_rate: f64 = 0,
+    target_rate: f64 = 0,
+    error_rate: f64 = 0,
+    requests: u64 = 0,
+};
+
+const PartialFile = struct {
+    runs: []const PartialRun = &.{},
+};
+
+const ScenarioEntry = struct {
+    id: []const u8 = "",
+    label: []const u8 = "",
+    description: []const u8 = "",
+    path: []const u8 = "",
+    method: []const u8 = "",
+};
+
+const PlatformEntry = struct {
+    id: []const u8 = "",
+    os: []const u8 = "",
+    arch: []const u8 = "",
+    label: []const u8 = "",
+};
+
+const ConfigEntry = struct {
+    runs: u32 = 0,
+    connections: u32 = 0,
+    threads: u32 = 0,
+    duration_s: u32 = 0,
+    rate: u64 = 0,
+    port: u16 = 0,
+};
+
+const PlatformMeta = struct {
+    id: []const u8 = "",
+    os: []const u8 = "",
+    os_version: []const u8 = "",
+    arch: []const u8 = "",
+    label: []const u8 = "",
+    hostname: []const u8 = "",
+};
+
+const MetaEntry = struct {
+    generated_at: []const u8 = "",
+    tool: []const u8 = "",
+    mode: []const u8 = "",
+    config: ConfigEntry = .{},
+    platform: PlatformMeta = .{},
+};
+
+const ResultsFile = struct {
+    meta: MetaEntry = .{},
+    scenarios: []const ScenarioEntry = &.{},
+    platforms: []const PlatformEntry = &.{},
+    runs: []const PartialRun = &.{},
+};
+
 fn partialPath(gpa: std.mem.Allocator, out_path: []const u8, framework: []const u8, platform: []const u8) ![]u8 {
     const dir = std.fs.path.dirname(out_path) orelse ".";
-    return try std.fmt.allocPrint(gpa, "{s}/.bench-{s}-{s}.tsv", .{ dir, framework, platform });
+    return try std.fmt.allocPrint(gpa, "{s}/.bench-{s}-{s}.zon", .{ dir, framework, platform });
 }
 
-fn writePartialTsv(gpa: std.mem.Allocator, io: Io, environ_map: *std.process.Environ.Map, out_path: []const u8, fresh: []const ScenarioResult) !void {
+fn toPartialRun(r: ScenarioResult, platform: []const u8) PartialRun {
+    return .{
+        .framework = r.framework,
+        .scenario = r.scenario,
+        .platform = platform,
+        .rps = r.rps,
+        .average = r.average_s,
+        .fastest = r.fastest_s,
+        .slowest = r.slowest_s,
+        .success_rate = r.success_rate,
+        .latency_p50 = r.latency_p50_s,
+        .latency_p95 = r.latency_p95_s,
+        .latency_p99 = r.latency_p99_s,
+        .achieved_rate = r.achieved_rate,
+        .target_rate = r.target_rate,
+        .error_rate = r.error_rate,
+        .requests = r.requests,
+    };
+}
+
+fn writeZon(w: *std.Io.Writer, value: anytype) !void {
+    try std.zon.stringify.serialize(value, .{}, w);
+    try w.writeByte('\n');
+}
+
+fn writePartial(gpa: std.mem.Allocator, io: Io, environ_map: *std.process.Environ.Map, out_path: []const u8, fresh: []const ScenarioResult) !void {
     if (fresh.len == 0) return;
     var platform_owned: ?[]u8 = null;
     defer if (platform_owned) |p| gpa.free(p);
@@ -197,46 +279,35 @@ fn writePartialTsv(gpa: std.mem.Allocator, io: Io, environ_map: *std.process.Env
     const path = try partialPath(gpa, out_path, fresh[0].framework, platform);
     defer gpa.free(path);
 
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var runs: std.ArrayList(PartialRun) = .empty;
+    defer runs.deinit(gpa);
+
     // Keep prior scenarios for this framework+platform when a later run covers only a subset.
-    var kept: std.ArrayList(u8) = .empty;
-    defer kept.deinit(gpa);
-    if (Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(1024 * 1024))) |existing| {
-        defer gpa.free(existing);
-        var lines = std.mem.splitScalar(u8, existing, '\n');
-        while (lines.next()) |line| {
-            if (line.len == 0) continue;
-            var cols = std.mem.splitScalar(u8, line, '\t');
-            _ = cols.next(); // framework
-            const scenario = cols.next() orelse continue;
+    if (Io.Dir.cwd().readFileAllocOptions(io, path, arena, .limited(1024 * 1024), .of(u8), 0)) |existing| {
+        const parsed = try std.zon.parse.fromSliceAlloc(PartialFile, arena, existing, null, .{ .ignore_unknown_fields = true });
+        for (parsed.runs) |r| {
             var replaced = false;
-            for (fresh) |r| {
-                if (std.mem.eql(u8, r.scenario, scenario)) {
+            for (fresh) |f| {
+                if (std.mem.eql(u8, f.scenario, r.scenario)) {
                     replaced = true;
                     break;
                 }
             }
-            if (!replaced) {
-                try kept.appendSlice(gpa, line);
-                try kept.append(gpa, '\n');
-            }
+            if (!replaced) try runs.append(gpa, r);
         }
     } else |_| {}
 
+    for (fresh) |r| {
+        try runs.append(gpa, toPartialRun(r, platform));
+    }
+
     var aw: std.Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
-    const w = &aw.writer;
-    try w.writeAll(kept.items);
-    for (fresh) |r| {
-        try w.print(
-            "{s}\t{s}\t{d:.6}\t{d:.9}\t{d:.9}\t{d:.9}\t{d:.6}\t{d:.9}\t{d:.9}\t{d:.9}\t{d:.6}\t{d:.6}\t{d:.6}\t{d}\n",
-            .{
-                r.framework,         r.scenario,       r.rps,           r.average_s,
-                r.fastest_s,         r.slowest_s,      r.success_rate,  r.latency_p50_s,
-                r.latency_p95_s,     r.latency_p99_s,  r.achieved_rate, r.target_rate,
-                r.error_rate,        r.requests,
-            },
-        );
-    }
+    try writeZon(&aw.writer, PartialFile{ .runs = runs.items });
     try Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = aw.written() });
 }
 
@@ -251,68 +322,42 @@ fn mergeFromSidecar(gpa: std.mem.Allocator, io: Io, environ_map: *std.process.En
         results.deinit(gpa);
     }
 
-    for (framework_meta) |meta| {
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    inline for (@typeInfo(@TypeOf(fig.frameworks)).@"struct".fields) |field| {
+        const name = @field(fig.frameworks, field.name);
         for (known_platforms) |pl| {
-            const path = try partialPath(gpa, out_path, meta.name, pl.id);
+            const path = try partialPath(gpa, out_path, name, pl.id);
             defer gpa.free(path);
-            const raw = Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(1024 * 1024)) catch continue;
-            defer gpa.free(raw);
-            try parsePartialLines(gpa, &results, raw, pl.id);
+            const raw = Io.Dir.cwd().readFileAllocOptions(io, path, arena, .limited(1024 * 1024), .of(u8), 0) catch continue;
+            const parsed = try std.zon.parse.fromSliceAlloc(PartialFile, arena, raw, null, .{ .ignore_unknown_fields = true });
+            for (parsed.runs) |r| {
+                try results.append(gpa, .{
+                    .framework = try gpa.dupe(u8, r.framework),
+                    .scenario = try gpa.dupe(u8, r.scenario),
+                    .platform = try gpa.dupe(u8, if (r.platform.len > 0) r.platform else pl.id),
+                    .rps = r.rps,
+                    .average_s = r.average,
+                    .fastest_s = r.fastest,
+                    .slowest_s = r.slowest,
+                    .success_rate = r.success_rate,
+                    .latency_p50_s = r.latency_p50,
+                    .latency_p95_s = r.latency_p95,
+                    .latency_p99_s = r.latency_p99,
+                    .achieved_rate = r.achieved_rate,
+                    .target_rate = r.target_rate,
+                    .error_rate = r.error_rate,
+                    .requests = r.requests,
+                });
+            }
         }
-        // Legacy un-suffixed partials from older bencher builds.
-        const legacy = try std.fmt.allocPrint(gpa, "{s}/.bench-{s}.tsv", .{ std.fs.path.dirname(out_path) orelse ".", meta.name });
-        defer gpa.free(legacy);
-        if (Io.Dir.cwd().readFileAlloc(io, legacy, gpa, .limited(1024 * 1024))) |raw| {
-            defer gpa.free(raw);
-            const platform = try detectPlatformId(gpa, environ_map);
-            defer gpa.free(platform);
-            try parsePartialLines(gpa, &results, raw, platform);
-        } else |_| {}
     }
 
     if (results.items.len == 0) return error.EmptySidecar;
     try writeResultsZon(gpa, io, environ_map, out_path, results.items);
     std.log.info("merged {d} runs → {s}", .{ results.items.len, out_path });
-}
-
-fn parsePartialLines(gpa: std.mem.Allocator, results: *std.ArrayList(ScenarioResult), raw: []const u8, platform: []const u8) !void {
-    var lines = std.mem.splitScalar(u8, raw, '\n');
-    while (lines.next()) |line| {
-        if (line.len == 0) continue;
-        var cols = std.mem.splitScalar(u8, line, '\t');
-        const fw = cols.next() orelse continue;
-        const scenario = cols.next() orelse continue;
-        const rps = try std.fmt.parseFloat(f64, cols.next() orelse return error.BadSidecar);
-        const average_s = try std.fmt.parseFloat(f64, cols.next() orelse return error.BadSidecar);
-        const fastest_s = try std.fmt.parseFloat(f64, cols.next() orelse return error.BadSidecar);
-        const slowest_s = try std.fmt.parseFloat(f64, cols.next() orelse return error.BadSidecar);
-        const success_rate = try std.fmt.parseFloat(f64, cols.next() orelse return error.BadSidecar);
-        const latency_p50_s = try std.fmt.parseFloat(f64, cols.next() orelse return error.BadSidecar);
-        const latency_p95_s = try std.fmt.parseFloat(f64, cols.next() orelse return error.BadSidecar);
-        const latency_p99_s = try std.fmt.parseFloat(f64, cols.next() orelse return error.BadSidecar);
-        const achieved_rate = try std.fmt.parseFloat(f64, cols.next() orelse return error.BadSidecar);
-        const target_rate = try std.fmt.parseFloat(f64, cols.next() orelse return error.BadSidecar);
-        const error_rate = try std.fmt.parseFloat(f64, cols.next() orelse return error.BadSidecar);
-        const requests = try std.fmt.parseInt(u64, cols.next() orelse return error.BadSidecar, 10);
-
-        try results.append(gpa, .{
-            .framework = try gpa.dupe(u8, fw),
-            .scenario = try gpa.dupe(u8, scenario),
-            .platform = try gpa.dupe(u8, platform),
-            .rps = rps,
-            .average_s = average_s,
-            .fastest_s = fastest_s,
-            .slowest_s = slowest_s,
-            .success_rate = success_rate,
-            .latency_p50_s = latency_p50_s,
-            .latency_p95_s = latency_p95_s,
-            .latency_p99_s = latency_p99_s,
-            .achieved_rate = achieved_rate,
-            .target_rate = target_rate,
-            .error_rate = error_rate,
-            .requests = requests,
-        });
-    }
 }
 
 fn listFrameworks(gpa: std.mem.Allocator) ![]const []const u8 {
@@ -497,13 +542,10 @@ fn runOnce(gpa: std.mem.Allocator, io: Io, host: []const u8, path: []const u8, m
 }
 
 fn writeResultsZon(gpa: std.mem.Allocator, io: Io, environ_map: *std.process.Environ.Map, out_path: []const u8, results: []const ScenarioResult) !void {
-    const file = try Io.Dir.cwd().createFile(io, out_path, .{});
-    defer file.close(io);
-    var buf: [64 * 1024]u8 = undefined;
-    var fw: Io.File.Writer = .init(file, io, &buf);
-    const w = &fw.interface;
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
 
-    const now = Io.Timestamp.now(io, .real).toSeconds();
     const host_platform = try detectPlatformId(gpa, environ_map);
     defer gpa.free(host_platform);
 
@@ -513,57 +555,30 @@ fn writeResultsZon(gpa: std.mem.Allocator, io: Io, environ_map: *std.process.Env
     else
         host_platform;
     const meta_info = platformInfo(meta_platform);
-
-    try w.writeAll("// Auto-generated by bench/bencher — do not edit by hand\n");
-    try w.writeAll(".{\n");
-    try w.writeAll("    .meta = .{\n");
-    try w.print("        .generated_at = \"{d}\",\n", .{now});
-    try w.writeAll("        .tool = \"zrk\",\n");
-    try w.writeAll("        .mode = \"docker\",\n");
-    try w.writeAll("        .config = .{\n");
-    try w.print("            .runs = {d},\n", .{fig.runs});
-    try w.print("            .connections = {d},\n", .{fig.connections});
-    try w.print("            .threads = {d},\n", .{fig.threads});
-    try w.print("            .duration_s = {d},\n", .{fig.duration_s});
-    try w.print("            .rate = {d},\n", .{fig.rate});
-    try w.print("            .port = {d},\n", .{fig.port});
-    try w.writeAll("        },\n");
-    try w.writeAll("        .platform = .{\n");
-    try w.print("            .id = \"{s}\",\n", .{meta_info.id});
-    try w.print("            .os = \"{s}\",\n", .{meta_info.os});
     const uname = std.posix.uname();
-    try w.print("            .os_version = \"{s}\",\n", .{trimCstr(&uname.release)});
-    try w.print("            .arch = \"{s}\",\n", .{meta_info.arch});
-    try w.print("            .label = \"{s}\",\n", .{meta_info.label});
-    try w.writeAll("            .hostname = \"bench\",\n");
-    try w.writeAll("        },\n");
-    try w.writeAll("    },\n");
+    const now = Io.Timestamp.now(io, .real).toSeconds();
 
-    try w.writeAll("    .scenarios = .{\n");
+    var scenarios: std.ArrayList(ScenarioEntry) = .empty;
     inline for (@typeInfo(@TypeOf(fig.scenarios)).@"struct".fields) |field| {
         const s = @field(fig.scenarios, field.name);
-        try w.writeAll("        .{\n");
-        try w.print("            .id = \"{s}\",\n", .{s.id});
-        try w.print("            .label = \"{s}\",\n", .{s.label});
-        try w.print("            .description = \"{s}\",\n", .{s.description});
-        try w.print("            .path = \"{s}\",\n", .{s.path});
-        try w.print("            .method = \"{s}\",\n", .{s.method});
-        try w.writeAll("        },\n");
+        try scenarios.append(arena, .{
+            .id = s.id,
+            .label = s.label,
+            .description = s.description,
+            .path = s.path,
+            .method = s.method,
+        });
     }
-    try w.writeAll(
-        \\        .{
-        \\            .id = "file_upload",
-        \\            .label = "File Upload",
-        \\            .description = "Multipart upload throughput (coming soon)",
-        \\            .path = "/upload",
-        \\            .method = "POST",
-        \\        },
-        \\
-    );
-    try w.writeAll("    },\n");
+    try scenarios.append(arena, .{
+        .id = "file_upload",
+        .label = "File Upload",
+        .description = "Multipart upload throughput (coming soon)",
+        .path = "/upload",
+        .method = "POST",
+    });
 
     // Platforms that have at least one run, then placeholders for the rest.
-    var seen: [known_platforms.len]bool = .{false} ** known_platforms.len;
+    var seen: [known_platforms.len]bool = @splat(false);
     for (results) |r| {
         const id = if (r.platform.len > 0) r.platform else host_platform;
         for (known_platforms, 0..) |pl, i| {
@@ -571,62 +586,56 @@ fn writeResultsZon(gpa: std.mem.Allocator, io: Io, environ_map: *std.process.Env
         }
     }
 
-    try w.writeAll("    .platforms = .{\n");
+    var platforms: std.ArrayList(PlatformEntry) = .empty;
     for (known_platforms, 0..) |pl, i| {
         if (!seen[i]) continue;
-        try w.writeAll("        .{\n");
-        try w.print("            .id = \"{s}\",\n", .{pl.id});
-        try w.print("            .os = \"{s}\",\n", .{pl.os});
-        try w.print("            .arch = \"{s}\",\n", .{pl.arch});
-        try w.print("            .label = \"{s}\",\n", .{pl.label});
-        try w.writeAll("        },\n");
+        try platforms.append(arena, .{ .id = pl.id, .os = pl.os, .arch = pl.arch, .label = pl.label });
     }
     for (known_platforms, 0..) |pl, i| {
         if (seen[i]) continue;
-        try w.writeAll("        .{\n");
-        try w.print("            .id = \"{s}\",\n", .{pl.id});
-        try w.print("            .os = \"{s}\",\n", .{pl.os});
-        try w.print("            .arch = \"{s}\",\n", .{pl.arch});
-        try w.print("            .label = \"{s}\",\n", .{pl.label});
-        try w.writeAll("        },\n");
+        try platforms.append(arena, .{ .id = pl.id, .os = pl.os, .arch = pl.arch, .label = pl.label });
     }
-    try w.writeAll("    },\n");
 
-    try w.writeAll("    .frameworks = .{\n");
-    for (framework_meta) |meta| {
-        try w.writeAll("        .{\n");
-        try w.print("            .name = \"{s}\",\n", .{meta.name});
-        try w.print("            .version = \"{s}\",\n", .{meta.version});
-        try w.print("            .repo_url = \"{s}\",\n", .{meta.repo_url});
-        try w.writeAll("        },\n");
-    }
-    try w.writeAll("    },\n");
-
-    try w.writeAll("    .runs = .{\n");
+    var runs: std.ArrayList(PartialRun) = .empty;
     for (results) |r| {
         const run_platform = if (r.platform.len > 0) r.platform else host_platform;
-        try w.writeAll("        .{\n");
-        try w.print("            .framework = \"{s}\",\n", .{r.framework});
-        try w.print("            .scenario = \"{s}\",\n", .{r.scenario});
-        try w.print("            .platform = \"{s}\",\n", .{run_platform});
-        try w.print("            .rps = {d:.2},\n", .{r.rps});
-        try w.print("            .average = {d:.9},\n", .{r.average_s});
-        try w.print("            .fastest = {d:.9},\n", .{r.fastest_s});
-        try w.print("            .slowest = {d:.9},\n", .{r.slowest_s});
-        try w.print("            .success_rate = {d:.6},\n", .{r.success_rate});
-        try w.print("            .latency_p50 = {d:.9},\n", .{r.latency_p50_s});
-        try w.print("            .latency_p95 = {d:.9},\n", .{r.latency_p95_s});
-        try w.print("            .latency_p99 = {d:.9},\n", .{r.latency_p99_s});
-        try w.print("            .achieved_rate = {d:.2},\n", .{r.achieved_rate});
-        try w.print("            .target_rate = {d:.2},\n", .{r.target_rate});
-        try w.print("            .error_rate = {d:.6},\n", .{r.error_rate});
-        try w.print("            .requests = {d},\n", .{r.requests});
-        try w.writeAll("        },\n");
+        try runs.append(arena, toPartialRun(r, run_platform));
     }
-    try w.writeAll("    },\n");
 
-    try w.writeAll(comparison_zon);
-    try w.writeAll("}\n");
+    const results_file: ResultsFile = .{
+        .meta = .{
+            .generated_at = try std.fmt.allocPrint(arena, "{d}", .{now}),
+            .tool = "zrk",
+            .mode = "docker",
+            .config = .{
+                .runs = fig.runs,
+                .connections = fig.connections,
+                .threads = fig.threads,
+                .duration_s = fig.duration_s,
+                .rate = fig.rate,
+                .port = fig.port,
+            },
+            .platform = .{
+                .id = meta_info.id,
+                .os = meta_info.os,
+                .os_version = try arena.dupe(u8, trimCstr(&uname.release)),
+                .arch = meta_info.arch,
+                .label = meta_info.label,
+                .hostname = "bench",
+            },
+        },
+        .scenarios = scenarios.items,
+        .platforms = platforms.items,
+        .runs = runs.items,
+    };
+
+    const file = try Io.Dir.cwd().createFile(io, out_path, .{});
+    defer file.close(io);
+    var buf: [64 * 1024]u8 = undefined;
+    var fw: Io.File.Writer = .init(file, io, &buf);
+    const w = &fw.interface;
+    try w.writeAll("// Auto-generated by bench/bencher — do not edit by hand\n");
+    try writeZon(w, results_file);
     try w.flush();
 }
 
@@ -670,113 +679,4 @@ fn asciiLower(gpa: std.mem.Allocator, s: []const u8) ![]u8 {
     }
     return out;
 }
-
-fn titleCaseWord(gpa: std.mem.Allocator, s: []const u8) ![]u8 {
-    const out = try gpa.dupe(u8, s);
-    if (out.len > 0 and out[0] >= 'a' and out[0] <= 'z') {
-        out[0] = out[0] - ('a' - 'A');
-    }
-    return out;
-}
-
-
-
-const comparison_zon =
-    \\    .comparison = .{
-    \\        .{
-    \\            .category = "Core Features",
-    \\            .description = "Essential characteristics and capabilities",
-    \\            .features = .{
-    \\                .{
-    \\                    .name = "Language",
-    \\                    .description = "Programming language and dependencies",
-    \\                    .zap = .{ .value = "Zig + C", .status = "warning" },
-    \\                    .httpz = .{ .value = "Pure Zig", .status = "success" },
-    \\                    .zzz = .{ .value = "Pure Zig", .status = "success" },
-    \\                    .zinc = .{ .value = "Pure Zig", .status = "success" },
-    \\                    .std = .{ .value = "Pure Zig", .status = "success" },
-    \\                },
-    \\                .{
-    \\                    .name = "External Dependencies",
-    \\                    .description = "Third-party library requirements",
-    \\                    .zap = .{ .value = "facil.io (C)", .status = "warning" },
-    \\                    .httpz = .{ .value = "None", .status = "success" },
-    \\                    .zzz = .{ .value = "tardy (Zig)", .status = "success" },
-    \\                    .zinc = .{ .value = "aio (Zig)", .status = "success" },
-    \\                    .std = .{ .value = "None", .status = "success" },
-    \\                },
-    \\                .{
-    \\                    .name = "Concurrency Model",
-    \\                    .description = "How concurrent requests are handled",
-    \\                    .zap = .{ .value = "Multi-threaded", .status = "success" },
-    \\                    .httpz = .{ .value = "Thread Pool", .status = "success" },
-    \\                    .zzz = .{ .value = "Async/Await", .status = "success" },
-    \\                    .zinc = .{ .value = "Async I/O", .status = "success" },
-    \\                    .std = .{ .value = "Multi-threaded", .status = "success" },
-    \\                },
-    \\                .{
-    \\                    .name = "API Level",
-    \\                    .description = "Abstraction level of the API",
-    \\                    .zap = .{ .value = "Mid-level", .status = "success" },
-    \\                    .httpz = .{ .value = "High-level", .status = "success" },
-    \\                    .zzz = .{ .value = "Mid-level", .status = "success" },
-    \\                    .zinc = .{ .value = "High-level", .status = "success" },
-    \\                    .std = .{ .value = "Low-level", .status = "warning" },
-    \\                },
-    \\            },
-    \\        },
-    \\        .{
-    \\            .category = "Developer Experience",
-    \\            .description = "Ease of use and built-in features",
-    \\            .features = .{
-    \\                .{
-    \\                    .name = "Built-in Router",
-    \\                    .description = "URL routing and path parameters",
-    \\                    .zap = .{ .value = "Manual", .status = "warning" },
-    \\                    .httpz = .{ .value = "Yes", .status = "success" },
-    \\                    .zzz = .{ .value = "Yes", .status = "success" },
-    \\                    .zinc = .{ .value = "Yes", .status = "success" },
-    \\                    .std = .{ .value = "No", .status = "error" },
-    \\                },
-    \\                .{
-    \\                    .name = "Path Parameters",
-    \\                    .description = "Dynamic URL parameter extraction",
-    \\                    .zap = .{ .value = "No", .status = "error" },
-    \\                    .httpz = .{ .value = "Yes", .status = "success" },
-    \\                    .zzz = .{ .value = "Yes", .status = "success" },
-    \\                    .zinc = .{ .value = "Yes", .status = "success" },
-    \\                    .std = .{ .value = "No", .status = "error" },
-    \\                },
-    \\                .{
-    \\                    .name = "Query Parameters",
-    \\                    .description = "URL query string parsing",
-    \\                    .zap = .{ .value = "Yes", .status = "success" },
-    \\                    .httpz = .{ .value = "Yes", .status = "success" },
-    \\                    .zzz = .{ .value = "Yes", .status = "success" },
-    \\                    .zinc = .{ .value = "Yes", .status = "success" },
-    \\                    .std = .{ .value = "No", .status = "error" },
-    \\                },
-    \\                .{
-    \\                    .name = "JSON Helpers",
-    \\                    .description = "Built-in JSON serialization",
-    \\                    .zap = .{ .value = "Yes", .status = "success" },
-    \\                    .httpz = .{ .value = "Yes", .status = "success" },
-    \\                    .zzz = .{ .value = "Yes", .status = "success" },
-    \\                    .zinc = .{ .value = "Yes", .status = "success" },
-    \\                    .std = .{ .value = "No", .status = "error" },
-    \\                },
-    \\                .{
-    \\                    .name = "Response Helpers",
-    \\                    .description = "Convenient response building",
-    \\                    .zap = .{ .value = "Yes", .status = "success" },
-    \\                    .httpz = .{ .value = "Yes", .status = "success" },
-    \\                    .zzz = .{ .value = "Yes", .status = "success" },
-    \\                    .zinc = .{ .value = "Yes", .status = "success" },
-    \\                    .std = .{ .value = "Manual", .status = "error" },
-    \\                },
-    \\            },
-    \\        },
-    \\    },
-    \\
-;
 

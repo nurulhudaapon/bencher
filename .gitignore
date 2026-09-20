@@ -9,8 +9,7 @@ bench/compose.generated.yml
 bench/bencher/.zig-cache/
 bench/bencher/zig-out/
 bench/bencher/zig-pkg/
-app/.bench-runs.ndjson
-app/.bench-*.tsv
+app/.bench-*.zon
 frameworks/*/.zig-cache/
 frameworks/*/zig-out/
 frameworks/*/zig-pkg/

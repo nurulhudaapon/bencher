@@ -1,0 +1,51 @@
+const Labels = View.Labels;
+const PlatformInfo = Result.PlatformInfo;
+
+pub fn MachineInfo(allocator: zx.Allocator, props: struct {
+    labels: Labels,
+    platform: PlatformInfo,
+}) zx.Component {
+    return (
+        <div @allocator={allocator} class="machine">
+            <div class="machine-wrap">
+                <div class="machine-trigger">
+                    <div class="machine-line">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span>{props.labels.platform}{" • "}{props.labels.tool}{" • "}{props.labels.mode}</span>
+                    </div>
+                </div>
+                <div class="machine-tooltip">
+                    <div class="machine-tooltip-arrow"></div>
+                    <div class="machine-tooltip-title">Benchmark Environment</div>
+
+                    <div class="machine-section">
+                        <div class="machine-section-label">Load Generator</div>
+                        <div class="machine-grid-2">
+                            <div class="machine-kv"><dt>Tool:</dt><dd>{props.labels.tool}</dd></div>
+                            <div class="machine-kv"><dt>Mode:</dt><dd>{props.labels.mode}</dd></div>
+                            <div class="machine-kv"><dt>Threads:</dt><dd>{props.labels.threads}</dd></div>
+                            <div class="machine-kv"><dt>Connections:</dt><dd>{props.labels.connections}</dd></div>
+                            <div class="machine-kv"><dt>Duration:</dt><dd>{props.labels.duration}</dd></div>
+                            <div class="machine-kv"><dt>Target rate:</dt><dd>{props.labels.rate}</dd></div>
+                            <div class="machine-kv"><dt>Runs:</dt><dd>{props.labels.runs}</dd></div>
+                        </div>
+                    </div>
+
+                    <div class="machine-section">
+                        <div class="machine-section-label">Primary Platform</div>
+                        <div class="machine-kv"><dt>Label:</dt><dd>{props.labels.platform}</dd></div>
+                        <div class="machine-kv"><dt>OS:</dt><dd>{props.platform.os}{" / "}{props.platform.arch}</dd></div>
+                        <div class="machine-kv"><dt>Kernel:</dt><dd>{props.platform.os_version}</dd></div>
+                        <div class="machine-kv"><dt>Host:</dt><dd>{props.platform.hostname}</dd></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+const zx = @import("zx");
+const View = @import("../View.zig");
+const Result = @import("../Result.zig");

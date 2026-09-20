@@ -1,0 +1,30 @@
+pub fn Header(allocator: zx.Allocator) zx.Component {
+    return (
+        <div @allocator={allocator} class="header">
+            <div class="header-title">
+                <ZigLogo />
+                Zig Web Servers
+            </div>
+            <div class="header-actions">
+                <a class="github-info" href="https://github.com/nurulhudaapon/bench-zig-web-frameworks" target="_blank" rel="noopener noreferrer" aria-label="GitHub repository">
+                    <GitHubIcon />
+                </a>
+                <a class="github-info" href="https://github.com/nurulhudaapon/bench-zig-web-frameworks" target="_blank" rel="noopener noreferrer">
+                    <img
+                        src="https://img.shields.io/github/stars/nurulhudaapon/bench-zig-web-frameworks?style=social&cacheSeconds=60"
+                        alt="GitHub stars"
+                        width="88"
+                        height="20"
+                    />
+                </a>
+                <div class="website-url" hidden>
+                    <span>bench.zig.bd</span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+const ZigLogo = @import("./zig_logo.zx").ZigLogo;
+const GitHubIcon = @import("./github_icon.zx").GitHubIcon;
+const zx = @import("zx");

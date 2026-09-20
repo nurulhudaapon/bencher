@@ -54,7 +54,7 @@ pub fn main(init: std.process.Init) !void {
 
     // Fair isolation: only one framework at a time.
     const volume = try std.fmt.allocPrint(arena, "{s}/app:/out", .{root});
-    // Clear prior partials; keep app/results.zon until merge rewrites it (UI imports it).
+    // Clear prior partials; keep app/results.zon until merge rewrites it.
     {
         const app_dir_path = try std.fs.path.join(arena, &.{ root, "app" });
         var app_dir = try Io.Dir.cwd().openDir(io, app_dir_path, .{ .iterate = true });
@@ -63,7 +63,7 @@ pub fn main(init: std.process.Init) !void {
         while (try it.next(io)) |entry| {
             if (entry.kind != .file) continue;
             if (!std.mem.startsWith(u8, entry.name, ".bench-")) continue;
-            if (!std.mem.endsWith(u8, entry.name, ".tsv") and !std.mem.endsWith(u8, entry.name, ".ndjson")) continue;
+            if (!std.mem.endsWith(u8, entry.name, ".zon")) continue;
             app_dir.deleteFile(io, entry.name) catch {};
         }
     }
@@ -162,11 +162,6 @@ pub fn main(init: std.process.Init) !void {
         runInDir(gpa, io, bench_dir, cmd.items) catch {};
     }
 
-    // Leave platform-tagged partials for CI multi-arch merge; remove only legacy.
-    for (discovered) |fw| {
-        const partial = try std.fmt.allocPrint(arena, "{s}/app/.bench-{s}.tsv", .{ root, fw });
-        Io.Dir.cwd().deleteFile(io, partial) catch {};
-    }
     std.log.info("done → {s}", .{out_zon});
 }
 
