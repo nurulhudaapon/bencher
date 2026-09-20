@@ -1,6 +1,3 @@
-//! Client-side "Save as PNG" control.
-//! Zig/Ziex owns the button + click; capture runs through zx.client.js → window.__benchSaveChart.
-
 pub fn SaveChartButton(ctx: *zx.ComponentContext) zx.Component {
     return (
         <button

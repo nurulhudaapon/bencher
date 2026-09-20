@@ -51,17 +51,10 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
-      # Warm setup-zig caches can skip ziex transpile, leaving
-      # .zig-cache/ziex/tnsn/results.zon missing while page.zx still
-      # @import("../results.zon") from that tree.
-      - name: Sync results into ziex transpile cache
+      - name: Build Site
         run: |
           test -f app/results.zon
-          mkdir -p .zig-cache/ziex/tnsn
-          cp -f app/results.zon .zig-cache/ziex/tnsn/results.zon
-
-      - name: Build Site
-        run: zig build zx -- export
+          zig build zx -- export
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

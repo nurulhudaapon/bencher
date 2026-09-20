@@ -1,14 +1,7 @@
-const results = @import("../results.zon");
-const frameworks_raw = results.frameworks;
-const comparison_raw = results.comparison;
-const scenarios_raw = results.scenarios;
-const platforms_raw = results.platforms;
-const runs_raw = results.runs;
-const meta = results.meta;
-
-const fw_len = @typeInfo(@TypeOf(frameworks_raw)).@"struct".field_names.len;
-const scenario_len = @typeInfo(@TypeOf(scenarios_raw)).@"struct".field_names.len;
-const platform_len = @typeInfo(@TypeOf(platforms_raw)).@"struct".field_names.len;
+const FeatureCell = Result.FeatureCell;
+const Scenario = Result.Scenario;
+const Platform = Result.Platform;
+const Run = Result.Run;
 
 const FrameworkMeta = struct {
     name: []const u8,
@@ -36,21 +29,6 @@ const Framework = struct {
     success_label: []const u8,
 };
 
-const Scenario = struct {
-    id: []const u8,
-    label: []const u8,
-    description: []const u8,
-    path: []const u8,
-    method: []const u8,
-};
-
-const Platform = struct {
-    id: []const u8,
-    label: []const u8,
-    os: []const u8,
-    arch: []const u8,
-};
-
 const SwitchOption = struct {
     id: []const u8,
     label: []const u8,
@@ -67,29 +45,10 @@ const arch_options = [_]SwitchOption{
     .{ .id = "aarch64", .label = "Arm" },
 };
 
-const Run = struct {
-    framework: []const u8,
-    scenario: []const u8,
-    platform: []const u8,
-    rps: f64,
-    average: f64,
-    fastest: f64,
-    slowest: f64,
-    success_rate: f64,
-    latency_p50: f64,
-    latency_p95: f64,
-    latency_p99: f64,
-};
-
-const FeatureCell = struct {
-    value: []const u8,
-    status: []const u8,
-};
-
 const FeatureRow = struct {
     name: []const u8,
     description: []const u8,
-    cells: [fw_len]FeatureCell,
+    cells: []const FeatureCell,
 };
 
 const Category = struct {
@@ -98,21 +57,28 @@ const Category = struct {
     features: []const FeatureRow,
 };
 
-fn formatInt(n: u64) []const u8 {
-    if (n >= 1_000_000) {
-        const millions = n / 1_000_000;
-        const thousands = (n / 1000) % 1000;
-        const rem = n % 1000;
-        return std.fmt.comptimePrint("{d},{d:0>3},{d:0>3}", .{ millions, thousands, rem });
-    }
-    if (n >= 1000) {
-        return std.fmt.comptimePrint("{d},{d:0>3}", .{ n / 1000, n % 1000 });
-    }
-    return std.fmt.comptimePrint("{d}", .{n});
-}
+/// One scenario × platform chart, with its bars already sorted and labelled.
+const Panel = struct {
+    scenario: Scenario,
+    platform: Platform,
+    active: bool,
+    frameworks: []const Framework,
+};
 
-fn formatRps(allocator: zx.Allocator, rps: f64) []const u8 {
-    const n: u64 = @intFromFloat(@round(rps));
+/// Preformatted strings for the benchmark environment tooltip.
+const Labels = struct {
+    tool: []const u8,
+    mode: []const u8,
+    platform: []const u8,
+    threads: []const u8,
+    connections: []const u8,
+    duration: []const u8,
+    rate: []const u8,
+    runs: []const u8,
+    colspan: []const u8,
+};
+
+fn formatCount(allocator: zx.Allocator, n: u64) []const u8 {
     if (n >= 1_000_000) {
         return std.fmt.allocPrint(allocator, "{d},{d:0>3},{d:0>3}", .{ n / 1_000_000, (n / 1000) % 1000, n % 1000 }) catch unreachable;
     }
@@ -120,6 +86,10 @@ fn formatRps(allocator: zx.Allocator, rps: f64) []const u8 {
         return std.fmt.allocPrint(allocator, "{d},{d:0>3}", .{ n / 1000, n % 1000 }) catch unreachable;
     }
     return std.fmt.allocPrint(allocator, "{d}", .{n}) catch unreachable;
+}
+
+fn formatRps(allocator: zx.Allocator, rps: f64) []const u8 {
+    return formatCount(allocator, @intFromFloat(@round(rps)));
 }
 
 fn formatMs(allocator: zx.Allocator, seconds: f64) []const u8 {
@@ -135,114 +105,73 @@ fn barHeight(allocator: zx.Allocator, rps: f64, max: f64) []const u8 {
     return std.fmt.allocPrint(allocator, "{d:.2}%", .{(rps / max) * 100.0}) catch unreachable;
 }
 
-fn languageLabel() []const u8 {
-    inline for (@typeInfo(@TypeOf(frameworks_raw)).@"struct".field_names) |name| {
-        const d = @field(frameworks_raw, name);
-        if (std.mem.eql(u8, d.name, "std")) {
-            return std.fmt.comptimePrint("Zig {s}", .{d.version});
+fn fetchResults(ctx: zx.PageContext) !Result {
+    const host = ctx.request.headers.get("host") orelse return error.ResultsFetchFailed;
+    const url = try std.fmt.allocPrint(ctx.arena, "http://{s}/results.json", .{host});
+
+    var response = (try zx.fetch(zx.Io.blocking, ctx.arena, url, .{})) orelse return error.ResultsFetchFailed;
+    defer response.deinit();
+    if (!response.ok()) return error.ResultsFetchFailed;
+
+    return zx.util.zxon.parse(Result, ctx.arena, try response.text(), .{});
+}
+
+fn languageLabel(allocator: zx.Allocator, frameworks: []const Result.Framework) []const u8 {
+    for (frameworks) |fw| {
+        if (std.mem.eql(u8, fw.name, "std")) {
+            return std.fmt.allocPrint(allocator, "Zig {s}", .{fw.version}) catch unreachable;
         }
     }
     return "Zig 0.16.0";
 }
 
-fn versionLabel(comptime version: []const u8) []const u8 {
+fn versionLabel(allocator: zx.Allocator, version: []const u8) []const u8 {
     if (std.mem.eql(u8, version, "master")) return "master";
-    return std.fmt.comptimePrint("v{s}", .{version});
+    return std.fmt.allocPrint(allocator, "v{s}", .{version}) catch unreachable;
 }
 
-fn loadFrameworkMetas() [fw_len]FrameworkMeta {
-    const lang = languageLabel();
-    var out: [fw_len]FrameworkMeta = undefined;
-    inline for (@typeInfo(@TypeOf(frameworks_raw)).@"struct".field_names, 0..) |name, i| {
-        const d = @field(frameworks_raw, name);
-        out[i] = .{
-            .name = d.name,
-            .version = d.version,
-            .version_label = versionLabel(d.version),
+fn buildFrameworkMetas(allocator: zx.Allocator, frameworks: []const Result.Framework) []const FrameworkMeta {
+    const lang = languageLabel(allocator, frameworks);
+    const metas = allocator.alloc(FrameworkMeta, frameworks.len) catch unreachable;
+    for (frameworks, metas) |fw, *meta| {
+        meta.* = .{
+            .name = fw.name,
+            .version = fw.version,
+            .version_label = versionLabel(allocator, fw.version),
             .language_label = lang,
-            .repo_url = d.repo_url,
+            .repo_url = fw.repo_url,
         };
     }
-    return out;
+    return metas;
 }
 
-fn loadScenarios() [scenario_len]Scenario {
-    var out: [scenario_len]Scenario = undefined;
-    inline for (@typeInfo(@TypeOf(scenarios_raw)).@"struct".field_names, 0..) |name, i| {
-        const d = @field(scenarios_raw, name);
-        out[i] = .{
-            .id = d.id,
-            .label = d.label,
-            .description = d.description,
-            .path = d.path,
-            .method = d.method,
-        };
-    }
-    return out;
-}
-
-fn loadPlatforms() [platform_len]Platform {
-    var out: [platform_len]Platform = undefined;
-    inline for (@typeInfo(@TypeOf(platforms_raw)).@"struct".field_names, 0..) |name, i| {
-        const d = @field(platforms_raw, name);
-        out[i] = .{
-            .id = d.id,
-            .label = d.label,
-            .os = d.os,
-            .arch = d.arch,
-        };
-    }
-    return out;
-}
-
-fn loadRunsArr() [@typeInfo(@TypeOf(runs_raw)).@"struct".field_names.len]Run {
-    @setEvalBranchQuota(200000);
-    const n = @typeInfo(@TypeOf(runs_raw)).@"struct".field_names.len;
-    var out: [n]Run = undefined;
-    inline for (@typeInfo(@TypeOf(runs_raw)).@"struct".field_names, 0..) |name, i| {
-        const d = @field(runs_raw, name);
-        out[i] = .{
-            .framework = d.framework,
-            .scenario = d.scenario,
-            .platform = d.platform,
-            .rps = d.rps,
-            .average = d.average,
-            .fastest = d.fastest,
-            .slowest = d.slowest,
-            .success_rate = d.success_rate,
-            .latency_p50 = d.latency_p50,
-            .latency_p95 = d.latency_p95,
-            .latency_p99 = d.latency_p99,
-        };
-    }
-    return out;
-}
-
-fn metaFor(name: []const u8) FrameworkMeta {
-    for (framework_metas) |m| {
+fn metaFor(metas: []const FrameworkMeta, name: []const u8) FrameworkMeta {
+    for (metas) |m| {
         if (std.mem.eql(u8, m.name, name)) return m;
     }
     return .{
         .name = name,
         .version = "0",
         .version_label = "v0",
-        .language_label = languageLabel(),
+        .language_label = if (metas.len > 0) metas[0].language_label else "Zig 0.16.0",
         .repo_url = "#",
     };
 }
 
 fn buildFrameworks(
     allocator: zx.Allocator,
+    metas: []const FrameworkMeta,
+    runs: []const Run,
     scenario_id: []const u8,
     platform_id: []const u8,
 ) []const Framework {
     var list: std.ArrayList(Framework) = .empty;
     var max: f64 = 0;
 
-    for (all_runs) |run| {
+    for (runs) |run| {
         if (!std.mem.eql(u8, run.scenario, scenario_id)) continue;
         if (!std.mem.eql(u8, run.platform, platform_id)) continue;
-        const m = metaFor(run.framework);
+        const m = metaFor(metas, run.framework);
         list.append(allocator, .{
             .name = m.name,
             .version = m.version,
@@ -277,41 +206,86 @@ fn buildFrameworks(
     return items;
 }
 
-const framework_metas = loadFrameworkMetas();
-const scenarios = loadScenarios();
-const platforms = loadPlatforms();
-const all_runs_arr = loadRunsArr();
-const all_runs: []const Run = &all_runs_arr;
-
-fn scenarioHasRuns(id: []const u8) bool {
-    for (all_runs) |run| {
+fn scenarioHasRuns(runs: []const Run, id: []const u8) bool {
+    for (runs) |run| {
         if (std.mem.eql(u8, run.scenario, id)) return true;
     }
     return false;
 }
 
-fn countRunnableScenarios() usize {
-    var n: usize = 0;
+fn buildRunnableScenarios(allocator: zx.Allocator, scenarios: []const Scenario, runs: []const Run) []const Scenario {
+    var list: std.ArrayList(Scenario) = .empty;
     for (scenarios) |sc| {
-        if (scenarioHasRuns(sc.id)) n += 1;
+        if (!scenarioHasRuns(runs, sc.id)) continue;
+        list.append(allocator, sc) catch unreachable;
     }
-    return n;
+    return list.toOwnedSlice(allocator) catch unreachable;
 }
 
-const runnable_scenario_len = countRunnableScenarios();
-
-fn loadRunnableScenarios() [runnable_scenario_len]Scenario {
-    var out: [runnable_scenario_len]Scenario = undefined;
-    var i: usize = 0;
+fn buildPanels(
+    allocator: zx.Allocator,
+    metas: []const FrameworkMeta,
+    runs: []const Run,
+    scenarios: []const Scenario,
+    platforms: []const Platform,
+    active_scenario: []const u8,
+    active_platform: []const u8,
+) []const Panel {
+    var list: std.ArrayList(Panel) = .empty;
     for (scenarios) |sc| {
-        if (!scenarioHasRuns(sc.id)) continue;
-        out[i] = sc;
-        i += 1;
+        for (platforms) |pl| {
+            list.append(allocator, .{
+                .scenario = sc,
+                .platform = pl,
+                .active = std.mem.eql(u8, sc.id, active_scenario) and std.mem.eql(u8, pl.id, active_platform),
+                .frameworks = buildFrameworks(allocator, metas, runs, sc.id, pl.id),
+            }) catch unreachable;
+        }
     }
-    return out;
+    return list.toOwnedSlice(allocator) catch unreachable;
 }
 
-const runnable_scenarios = loadRunnableScenarios();
+fn buildCategories(
+    allocator: zx.Allocator,
+    comparison: []const Result.Category,
+    metas: []const FrameworkMeta,
+) []const Category {
+    const categories = allocator.alloc(Category, comparison.len) catch unreachable;
+    for (comparison, categories) |src, *category| {
+        const rows = allocator.alloc(FeatureRow, src.features.len) catch unreachable;
+        for (src.features, rows) |feature, *row| {
+            const cells = allocator.alloc(FeatureCell, metas.len) catch unreachable;
+            for (metas, cells) |fw, *cell| {
+                cell.* = Result.cellFor(feature, fw.name);
+            }
+            row.* = .{
+                .name = feature.name,
+                .description = feature.description,
+                .cells = cells,
+            };
+        }
+        category.* = .{
+            .name = src.category,
+            .description = src.description,
+            .features = rows,
+        };
+    }
+    return categories;
+}
+
+fn buildLabels(allocator: zx.Allocator, meta: Result.Meta, fw_len: usize) Labels {
+    return .{
+        .tool = meta.tool,
+        .mode = meta.mode,
+        .platform = meta.platform.label,
+        .threads = std.fmt.allocPrint(allocator, "{d}", .{meta.config.threads}) catch unreachable,
+        .connections = std.fmt.allocPrint(allocator, "{d}", .{meta.config.connections}) catch unreachable,
+        .duration = std.fmt.allocPrint(allocator, "{d}s", .{meta.config.duration_s}) catch unreachable,
+        .rate = formatCount(allocator, meta.config.rate),
+        .runs = std.fmt.allocPrint(allocator, "{d}", .{meta.config.runs}) catch unreachable,
+        .colspan = std.fmt.allocPrint(allocator, "{d}", .{fw_len + 1}) catch unreachable,
+    };
+}
 
 fn osLabel(id: []const u8) []const u8 {
     for (os_options) |opt| {
@@ -326,70 +300,6 @@ fn archLabel(id: []const u8) []const u8 {
     }
     return id;
 }
-
-fn cellFor(feature: anytype, fw_name: []const u8) FeatureCell {
-    const T = @TypeOf(feature);
-    inline for (@typeInfo(T).@"struct".field_names) |name| {
-        if (std.mem.eql(u8, name, "name") or std.mem.eql(u8, name, "description"))
-            continue;
-        if (std.mem.eql(u8, name, fw_name)) {
-            const cell = @field(feature, name);
-            return .{ .value = cell.value, .status = cell.status };
-        }
-    }
-    return .{ .value = "—", .status = "error" };
-}
-
-fn countFeatures(comptime category: anytype) usize {
-    return @typeInfo(@TypeOf(category.features)).@"struct".field_names.len;
-}
-
-fn loadFeatureRows(comptime category: anytype) [countFeatures(category)]FeatureRow {
-    @setEvalBranchQuota(100000);
-    var rows: [countFeatures(category)]FeatureRow = undefined;
-    inline for (@typeInfo(@TypeOf(category.features)).@"struct".field_names, 0..) |feat_name, i| {
-        const feature = @field(category.features, feat_name);
-        var cells: [fw_len]FeatureCell = undefined;
-        for (framework_metas, 0..) |fw, j| {
-            cells[j] = cellFor(feature, fw.name);
-        }
-        rows[i] = .{
-            .name = feature.name,
-            .description = feature.description,
-            .cells = cells,
-        };
-    }
-    return rows;
-}
-
-const core_features = loadFeatureRows(@field(comparison_raw, "0"));
-const dx_features = loadFeatureRows(@field(comparison_raw, "1"));
-
-const categories = [_]Category{
-    .{
-        .name = @field(comparison_raw, "0").category,
-        .description = @field(comparison_raw, "0").description,
-        .features = &core_features,
-    },
-    .{
-        .name = @field(comparison_raw, "1").category,
-        .description = @field(comparison_raw, "1").description,
-        .features = &dx_features,
-    },
-};
-
-const tool_label = meta.tool;
-const mode_label = meta.mode;
-const platform_label = meta.platform.label;
-const threads_label = std.fmt.comptimePrint("{d}", .{meta.config.threads});
-const connections_label = std.fmt.comptimePrint("{d}", .{meta.config.connections});
-const duration_label = std.fmt.comptimePrint("{d}s", .{meta.config.duration_s});
-const rate_label = formatInt(meta.config.rate);
-const runs_label = std.fmt.comptimePrint("{d}", .{meta.config.runs});
-const colspan_label = std.fmt.comptimePrint("{d}", .{fw_len + 1});
-const default_platform = platforms[0].id;
-const default_os = platforms[0].os;
-const default_arch = platforms[0].arch;
 
 fn StatusIcon(allocator: zx.Allocator, props: struct { status: []const u8 }) zx.Component {
     if (std.mem.eql(u8, props.status, "success")) {
@@ -494,28 +404,21 @@ fn BarColumn(allocator: zx.Allocator, props: struct { fw: Framework, index: usiz
     );
 }
 
-fn ChartPanelView(
-    allocator: zx.Allocator,
-    props: struct {
-        scenario: Scenario,
-        platform: Platform,
-        active: bool,
-    },
-) zx.Component {
-    const frameworks = buildFrameworks(allocator, props.scenario.id, props.platform.id);
-    const class = if (props.active) "chart-panel chart-panel-active" else "chart-panel";
-    const title = std.fmt.allocPrint(allocator, "HTTP requests per second · {s}", .{props.scenario.label}) catch unreachable;
-    const panel_id = std.fmt.allocPrint(allocator, "panel-{s}-{s}", .{ props.scenario.id, props.platform.id }) catch unreachable;
+fn ChartPanelView(allocator: zx.Allocator, props: struct { panel: Panel }) zx.Component {
+    const panel = props.panel;
+    const class = if (panel.active) "chart-panel chart-panel-active" else "chart-panel";
+    const title = std.fmt.allocPrint(allocator, "HTTP requests per second · {s}", .{panel.scenario.label}) catch unreachable;
+    const panel_id = std.fmt.allocPrint(allocator, "panel-{s}-{s}", .{ panel.scenario.id, panel.platform.id }) catch unreachable;
 
-    if (frameworks.len == 0) {
+    if (panel.frameworks.len == 0) {
         return (
             <div
                 @allocator={allocator}
                 class={class}
                 id={panel_id}
-                data-scenario={props.scenario.id}
-                data-platform={props.platform.id}
-                hidden={!props.active}
+                data-scenario={panel.scenario.id}
+                data-platform={panel.platform.id}
+                hidden={!panel.active}
             >
                 <h2 class="chart-title">{title}</h2>
                 <div class="chart-empty">
@@ -531,14 +434,14 @@ fn ChartPanelView(
             @allocator={allocator}
             class={class}
             id={panel_id}
-            data-scenario={props.scenario.id}
-            data-platform={props.platform.id}
-            hidden={!props.active}
+            data-scenario={panel.scenario.id}
+            data-platform={panel.platform.id}
+            hidden={!panel.active}
         >
             <h2 class="chart-title">{title}</h2>
             <div class="chart-inner">
                 <div class="bars">
-                    {for (frameworks, 0..) |fw, i| (
+                    {for (panel.frameworks, 0..) |fw, i| (
                         <BarColumn fw={fw} index={i} />
                     )}
                 </div>
@@ -566,11 +469,11 @@ fn FeatureRowView(allocator: zx.Allocator, props: struct { row: FeatureRow }) zx
     );
 }
 
-fn CategoryView(allocator: zx.Allocator, props: struct { category: Category }) zx.Component {
+fn CategoryView(allocator: zx.Allocator, props: struct { category: Category, colspan: []const u8 }) zx.Component {
     return (
         <fragment @allocator={allocator}>
             <tr class="category-row">
-                <td colspan={colspan_label}>
+                <td colspan={props.colspan}>
                     <h3 class="category-title">{props.category.name}</h3>
                     <p class="category-desc">{props.category.description}</p>
                 </td>
@@ -660,7 +563,22 @@ const save_chart_script = @embedFile("../assets/save_chart.js");
 
 pub fn Page(ctx: zx.PageContext) !zx.Component {
     const allocator = ctx.arena;
+    const results = try fetchResults(ctx);
+
+    const meta = results.meta;
+    const platforms = results.platforms;
+    const framework_metas = buildFrameworkMetas(allocator, results.frameworks);
+    const runnable_scenarios = buildRunnableScenarios(allocator, results.scenarios, results.runs);
+    if (platforms.len == 0 or runnable_scenarios.len == 0) return error.ResultsIncomplete;
+
     const initial_scenario = runnable_scenarios[0];
+    const default_platform = platforms[0].id;
+    const default_os = platforms[0].os;
+    const default_arch = platforms[0].arch;
+
+    const panels = buildPanels(allocator, framework_metas, results.runs, runnable_scenarios, platforms, initial_scenario.id, default_platform);
+    const categories = buildCategories(allocator, results.comparison, framework_metas);
+    const labels = buildLabels(allocator, meta, framework_metas.len);
 
     return (
         <div
@@ -752,14 +670,8 @@ pub fn Page(ctx: zx.PageContext) !zx.Component {
                         </div>
                     </div>
 
-                    {for (runnable_scenarios) |sc| (
-                        for (platforms) |pl| (
-                            <ChartPanelView
-                                scenario={sc}
-                                platform={pl}
-                                active={std.mem.eql(u8, sc.id, initial_scenario.id) and std.mem.eql(u8, pl.id, default_platform)}
-                            />
-                        )
+                    {for (panels) |panel| (
+                        <ChartPanelView panel={panel} />
                     )}
 
                     <div class="machine">
@@ -769,7 +681,7 @@ pub fn Page(ctx: zx.PageContext) !zx.Component {
                                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                     </svg>
-                                    <span>{platform_label}{" • "}{tool_label}{" • "}{mode_label}</span>
+                                    <span>{labels.platform}{" • "}{labels.tool}{" • "}{labels.mode}</span>
                                 </div>
                             </div>
                             <div class="machine-tooltip">
@@ -779,19 +691,19 @@ pub fn Page(ctx: zx.PageContext) !zx.Component {
                                 <div class="machine-section">
                                     <div class="machine-section-label">Load Generator</div>
                                     <div class="machine-grid-2">
-                                        <div class="machine-kv"><dt>Tool:</dt><dd>{tool_label}</dd></div>
-                                        <div class="machine-kv"><dt>Mode:</dt><dd>{mode_label}</dd></div>
-                                        <div class="machine-kv"><dt>Threads:</dt><dd>{threads_label}</dd></div>
-                                        <div class="machine-kv"><dt>Connections:</dt><dd>{connections_label}</dd></div>
-                                        <div class="machine-kv"><dt>Duration:</dt><dd>{duration_label}</dd></div>
-                                        <div class="machine-kv"><dt>Target rate:</dt><dd>{rate_label}</dd></div>
-                                        <div class="machine-kv"><dt>Runs:</dt><dd>{runs_label}</dd></div>
+                                        <div class="machine-kv"><dt>Tool:</dt><dd>{labels.tool}</dd></div>
+                                        <div class="machine-kv"><dt>Mode:</dt><dd>{labels.mode}</dd></div>
+                                        <div class="machine-kv"><dt>Threads:</dt><dd>{labels.threads}</dd></div>
+                                        <div class="machine-kv"><dt>Connections:</dt><dd>{labels.connections}</dd></div>
+                                        <div class="machine-kv"><dt>Duration:</dt><dd>{labels.duration}</dd></div>
+                                        <div class="machine-kv"><dt>Target rate:</dt><dd>{labels.rate}</dd></div>
+                                        <div class="machine-kv"><dt>Runs:</dt><dd>{labels.runs}</dd></div>
                                     </div>
                                 </div>
 
                                 <div class="machine-section">
                                     <div class="machine-section-label">Primary Platform</div>
-                                    <div class="machine-kv"><dt>Label:</dt><dd>{platform_label}</dd></div>
+                                    <div class="machine-kv"><dt>Label:</dt><dd>{labels.platform}</dd></div>
                                     <div class="machine-kv"><dt>OS:</dt><dd>{meta.platform.os}{" / "}{meta.platform.arch}</dd></div>
                                     <div class="machine-kv"><dt>Kernel:</dt><dd>{meta.platform.os_version}</dd></div>
                                     <div class="machine-kv"><dt>Host:</dt><dd>{meta.platform.hostname}</dd></div>
@@ -816,7 +728,7 @@ pub fn Page(ctx: zx.PageContext) !zx.Component {
                     </thead>
                     <tbody>
                         {for (categories) |category| (
-                            <CategoryView category={category} />
+                            <CategoryView category={category} colspan={labels.colspan} />
                         )}
                     </tbody>
                 </table>
@@ -828,6 +740,8 @@ pub fn Page(ctx: zx.PageContext) !zx.Component {
     );
 }
 
+const Result = @import("../Result.zig");
+pub const SaveChartButton = @import("./../components/save_chart.zx").SaveChartButton;
+
 const std = @import("std");
 const zx = @import("zx");
-pub const SaveChartButton = @import("./save_chart.zx").SaveChartButton;
