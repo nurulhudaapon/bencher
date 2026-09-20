@@ -42,30 +42,30 @@ pub fn Page(ctx: zx.PageContext) !zx.Component {
             data-default-os={default_os}
             data-default-arch={default_arch}
         >
-            <div class="panel" id="export-root">
-                <Header />
+            <div class="stage">
+                <div class="panel" id="export-root">
+                    <Header />
 
-                <div class="chart">
-                    <SaveChartButton @rendering={.client} />
+                    <div class="chart">
+                        <BenchControls
+                            scenarios={runnable_scenarios}
+                            available_os={available_os}
+                            available_arch={available_arch}
+                            initial_scenario_id={initial_scenario.id}
+                            default_os={default_os}
+                            default_arch={default_arch}
+                        />
 
-                    <BenchControls
-                        scenarios={runnable_scenarios}
-                        available_os={available_os}
-                        available_arch={available_arch}
-                        initial_scenario_id={initial_scenario.id}
-                        default_os={default_os}
-                        default_arch={default_arch}
-                    />
+                        {for (panels) |panel| (
+                            <ChartPanel panel={panel} />
+                        )}
 
-                    {for (panels) |panel| (
-                        <ChartPanel panel={panel} />
-                    )}
-
-                    <MachineInfo labels={labels} platform={meta.platform} />
+                        <MachineInfo labels={labels} platform={meta.platform} />
+                    </div>
                 </div>
-            </div>
 
-            <div class="spacer"></div>
+                <SideRail panels={panels} />
+            </div>
 
             <ComparisonTable
                 frameworks={framework_metas}
@@ -90,4 +90,5 @@ const BenchControls = @import("../components/bench_controls.zx").BenchControls;
 const ChartPanel = @import("../components/chart_panel.zx").ChartPanel;
 const MachineInfo = @import("../components/machine_info.zx").MachineInfo;
 const ComparisonTable = @import("../components/comparison_table.zx").ComparisonTable;
+const SideRail = @import("../components/side_rail.zx").SideRail;
 pub const SaveChartButton = @import("../components/save_chart.zx").SaveChartButton;

@@ -1,7 +1,4 @@
-# syntax=docker/dockerfile:1
-# Listens on 8081 — GET /httpz must return OK for healthchecks.
 ARG CACHE_BUST=9
-# Zinc uses aio (io_uring on Linux) — compose marks this service privileged.
 ARG ZIG_VER=0.17.0-dev.2131+d08989840
 
 FROM debian:12-slim AS build

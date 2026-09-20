@@ -5,9 +5,11 @@ pub fn MachineInfo(allocator: zx.Allocator, props: struct {
     labels: Labels,
     platform: PlatformInfo,
 }) zx.Component {
+    const os_arch = std.fmt.allocPrint(allocator, "{s} / {s}", .{ props.platform.os, props.platform.arch }) catch unreachable;
+
     return (
         <div @allocator={allocator} class="machine">
-            <div class="machine-wrap">
+            <div class="info-tip-wrap machine-wrap">
                 <div class="machine-trigger">
                     <div class="machine-line">
                         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -16,29 +18,29 @@ pub fn MachineInfo(allocator: zx.Allocator, props: struct {
                         <span>{props.labels.platform}{" • "}{props.labels.tool}{" • "}{props.labels.mode}</span>
                     </div>
                 </div>
-                <div class="machine-tooltip">
-                    <div class="machine-tooltip-arrow"></div>
-                    <div class="machine-tooltip-title">Benchmark Environment</div>
+                <div class="info-tip">
+                    <div class="info-tip-arrow"></div>
+                    <div class="info-tip-title">Benchmark Environment</div>
 
-                    <div class="machine-section">
-                        <div class="machine-section-label">Load Generator</div>
-                        <div class="machine-grid-2">
-                            <div class="machine-kv"><dt>Tool:</dt><dd>{props.labels.tool}</dd></div>
-                            <div class="machine-kv"><dt>Mode:</dt><dd>{props.labels.mode}</dd></div>
-                            <div class="machine-kv"><dt>Threads:</dt><dd>{props.labels.threads}</dd></div>
-                            <div class="machine-kv"><dt>Connections:</dt><dd>{props.labels.connections}</dd></div>
-                            <div class="machine-kv"><dt>Duration:</dt><dd>{props.labels.duration}</dd></div>
-                            <div class="machine-kv"><dt>Target rate:</dt><dd>{props.labels.rate}</dd></div>
-                            <div class="machine-kv"><dt>Runs:</dt><dd>{props.labels.runs}</dd></div>
+                    <div class="info-tip-section">
+                        <div class="info-tip-section-label">Load Generator</div>
+                        <div class="info-tip-grid">
+                            <div class="info-tip-kv"><dt>Tool:</dt><dd>{props.labels.tool}</dd></div>
+                            <div class="info-tip-kv"><dt>Mode:</dt><dd>{props.labels.mode}</dd></div>
+                            <div class="info-tip-kv"><dt>Threads:</dt><dd>{props.labels.threads}</dd></div>
+                            <div class="info-tip-kv"><dt>Connections:</dt><dd>{props.labels.connections}</dd></div>
+                            <div class="info-tip-kv"><dt>Duration:</dt><dd>{props.labels.duration}</dd></div>
+                            <div class="info-tip-kv"><dt>Target rate:</dt><dd>{props.labels.rate}</dd></div>
+                            <div class="info-tip-kv"><dt>Runs:</dt><dd>{props.labels.runs}</dd></div>
                         </div>
                     </div>
 
-                    <div class="machine-section">
-                        <div class="machine-section-label">Primary Platform</div>
-                        <div class="machine-kv"><dt>Label:</dt><dd>{props.labels.platform}</dd></div>
-                        <div class="machine-kv"><dt>OS:</dt><dd>{props.platform.os}{" / "}{props.platform.arch}</dd></div>
-                        <div class="machine-kv"><dt>Kernel:</dt><dd>{props.platform.os_version}</dd></div>
-                        <div class="machine-kv"><dt>Host:</dt><dd>{props.platform.hostname}</dd></div>
+                    <div class="info-tip-section">
+                        <div class="info-tip-section-label">Primary Platform</div>
+                        <div class="info-tip-kv"><dt>Label:</dt><dd>{props.labels.platform}</dd></div>
+                        <div class="info-tip-kv"><dt>OS:</dt><dd>{os_arch}</dd></div>
+                        <div class="info-tip-kv"><dt>Kernel:</dt><dd>{props.platform.os_version}</dd></div>
+                        <div class="info-tip-kv"><dt>Host:</dt><dd>{props.platform.hostname}</dd></div>
                     </div>
                 </div>
             </div>
@@ -46,6 +48,7 @@ pub fn MachineInfo(allocator: zx.Allocator, props: struct {
     );
 }
 
+const std = @import("std");
 const zx = @import("zx");
 const View = @import("../View.zig");
 const Result = @import("../Result.zig");

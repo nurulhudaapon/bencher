@@ -1,0 +1,19 @@
+const Panel = View.Panel;
+
+pub fn SideRail(allocator: zx.Allocator, props: struct {
+    panels: []const Panel,
+}) zx.Component {
+    return (
+        <aside @allocator={allocator} class="side-rail" aria-label="Ranking">
+            <section class="side-card side-card-ranking">
+                {for (props.panels) |panel| (
+                    <RankingPanel panel={panel} />
+                )}
+            </section>
+        </aside>
+    );
+}
+
+const zx = @import("zx");
+const View = @import("../View.zig");
+const RankingPanel = @import("./ranking_panel.zx").RankingPanel;

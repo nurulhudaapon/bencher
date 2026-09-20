@@ -31,10 +31,11 @@
     var archActive = root.querySelector('[data-arch-btn="' + arch + '"]');
     if (osCurrent && osActive) osCurrent.textContent = osActive.textContent.trim();
     if (archCurrent && archActive) archCurrent.textContent = archActive.textContent.trim();
-    root.querySelectorAll(".chart-panel").forEach(function (panel) {
+    root.querySelectorAll(".chart-panel, .rank-panel").forEach(function (panel) {
       var match = panel.getAttribute("data-scenario") === scenario &&
                   panel.getAttribute("data-platform") === platform;
       panel.classList.toggle("chart-panel-active", match);
+      panel.classList.toggle("rank-panel-active", match);
       if (match) panel.removeAttribute("hidden");
       else panel.setAttribute("hidden", "");
     });

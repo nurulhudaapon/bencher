@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-# Listens on 8081 — GET /httpz must return OK for healthchecks.
 ARG ZIG_VER=0.16.0
 
 FROM debian:12-slim AS build

@@ -10,7 +10,7 @@ const Response = struct {
 
 pub const response: Response = @import("asset/response.zon");
 
-/// Fixed listen port for every framework container (Docker healthcheck + bencher).
+/// Fixed listen port for every framework container (Docker healthcheck + loadgen).
 pub const port = 8081;
 pub const thread_count = 2;
 pub const worker_count = 4;

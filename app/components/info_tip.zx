@@ -1,0 +1,32 @@
+pub const Row = struct {
+    label: []const u8,
+    value: []const u8,
+};
+
+/// Shared popover chrome used by machine env + framework name tips.
+pub fn InfoTip(allocator: zx.Allocator, props: struct {
+    title: []const u8,
+    rows: []const Row,
+    /// `"above"` opens upward (framework names); `"below"` opens downward (machine).
+    placement: []const u8 = "below",
+}) zx.Component {
+    const tip_class = if (std.mem.eql(u8, props.placement, "above"))
+        "info-tip info-tip-above"
+    else
+        "info-tip";
+
+    return (
+        <div @allocator={allocator} class={tip_class}>
+            <div class="info-tip-arrow"></div>
+            <div class="info-tip-title">{props.title}</div>
+            <div class="info-tip-body">
+                {for (props.rows) |row| (
+                    <div class="info-tip-kv"><dt>{row.label}</dt><dd>{row.value}</dd></div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+const std = @import("std");
+const zx = @import("zx");

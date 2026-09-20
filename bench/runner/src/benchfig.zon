@@ -12,7 +12,7 @@
         .{
             .id = "plaintext",
             .label = "Plaintext",
-            .description = "Minimal OK response — peak request throughput",
+            .description = "Minimal OK response - peak request throughput",
             .path = "/httpz",
             .method = "GET",
         },

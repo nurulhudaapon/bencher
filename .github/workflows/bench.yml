@@ -67,7 +67,7 @@ jobs:
         id: meta
         run: |
           if [ "${{ matrix.image }}" = "bencher" ]; then
-            echo "file=bench/Dockerfile.bench" >> "$GITHUB_OUTPUT"
+            echo "file=bench/docker/Dockerfile" >> "$GITHUB_OUTPUT"
             echo "tag=zig_web_bench-bencher" >> "$GITHUB_OUTPUT"
           else
             echo "file=frameworks/${{ matrix.image }}/Dockerfile" >> "$GITHUB_OUTPUT"
@@ -230,7 +230,7 @@ jobs:
           mkdir -p app
           find _partials -type f -name '.bench-*.zon' -print -exec cp -v {} app/ \;
           ls -la app/.bench-*.zon || {
-            echo "No platform partials found — cannot merge"
+            echo "No platform partials found - cannot merge"
             exit 1
           }
 

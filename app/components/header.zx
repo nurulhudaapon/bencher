@@ -6,14 +6,15 @@ pub fn Header(allocator: zx.Allocator) zx.Component {
                 Zig Web Servers
             </div>
             <div class="header-actions">
+                <SaveChartButton @rendering={.client} />
                 <a class="github-info" href="https://github.com/nurulhudaapon/bench-zig-web-frameworks" target="_blank" rel="noopener noreferrer" aria-label="GitHub repository">
                     <GitHubIcon />
                 </a>
-                <a class="github-info" href="https://github.com/nurulhudaapon/bench-zig-web-frameworks" target="_blank" rel="noopener noreferrer">
+                <a style="display: none;" class="github-info github-stars" href="https://github.com/nurulhudaapon/bench-zig-web-frameworks" target="_blank" rel="noopener noreferrer">
                     <img
-                        src="https://img.shields.io/github/stars/nurulhudaapon/bench-zig-web-frameworks?style=social&cacheSeconds=60"
+                        src="https://img.shields.io/github/stars/nurulhudaapon/bench-zig-web-frameworks?style=flat&label=Stars&labelColor=111827&color=f7a41d&cacheSeconds=60"
                         alt="GitHub stars"
-                        width="88"
+                        width="86"
                         height="20"
                     />
                 </a>
@@ -27,4 +28,5 @@ pub fn Header(allocator: zx.Allocator) zx.Component {
 
 const ZigLogo = @import("./zig_logo.zx").ZigLogo;
 const GitHubIcon = @import("./github_icon.zx").GitHubIcon;
+pub const SaveChartButton = @import("./save_chart.zx").SaveChartButton;
 const zx = @import("zx");

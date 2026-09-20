@@ -12,7 +12,7 @@ pub const Framework = struct {
 };
 
 pub const FeatureCell = struct {
-    value: []const u8 = "—",
+    value: []const u8 = "-",
     status: []const u8 = "error",
 };
 

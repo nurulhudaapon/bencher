@@ -3,7 +3,6 @@ const Panel = View.Panel;
 pub fn ChartPanel(allocator: zx.Allocator, props: struct { panel: Panel }) zx.Component {
     const panel = props.panel;
     const class = if (panel.active) "chart-panel chart-panel-active" else "chart-panel";
-    const title = std.fmt.allocPrint(allocator, "HTTP requests per second · {s}", .{panel.scenario.label}) catch unreachable;
     const panel_id = std.fmt.allocPrint(allocator, "panel-{s}-{s}", .{ panel.scenario.id, panel.platform.id }) catch unreachable;
 
     if (panel.frameworks.len == 0) {
@@ -16,7 +15,11 @@ pub fn ChartPanel(allocator: zx.Allocator, props: struct { panel: Panel }) zx.Co
                 data-platform={panel.platform.id}
                 hidden={!panel.active}
             >
-                <h2 class="chart-title">{title}</h2>
+                <h2 class="chart-title">
+                    <span class="chart-metric">Requests / sec</span>
+                    <span class="chart-dot" aria-hidden="true">·</span>
+                    <span class="chart-scenario">{panel.scenario.label}</span>
+                </h2>
                 <div class="chart-empty">
                     <p class="chart-empty-title">No results yet</p>
                     <p class="chart-empty-desc">This scenario is configured for future runs. Re-run the Docker bench once the endpoint is implemented.</p>
@@ -34,7 +37,11 @@ pub fn ChartPanel(allocator: zx.Allocator, props: struct { panel: Panel }) zx.Co
             data-platform={panel.platform.id}
             hidden={!panel.active}
         >
-            <h2 class="chart-title">{title}</h2>
+            <h2 class="chart-title">
+                <span class="chart-metric">Requests / sec</span>
+                <span class="chart-dot" aria-hidden="true">·</span>
+                <span class="chart-scenario">{panel.scenario.label}</span>
+            </h2>
             <div class="chart-inner">
                 <div class="bars">
                     {for (panel.frameworks, 0..) |fw, i| (

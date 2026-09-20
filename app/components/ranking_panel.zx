@@ -1,0 +1,71 @@
+const Panel = View.Panel;
+const Framework = View.Framework;
+
+fn RankRow(allocator: zx.Allocator, props: struct { fw: Framework, index: usize }) zx.Component {
+    const rank = std.fmt.allocPrint(allocator, "{d}", .{props.index + 1}) catch unreachable;
+    const fill_style = std.fmt.allocPrint(allocator, "width: {s}", .{props.fw.height}) catch unreachable;
+
+    return (
+        <div @allocator={allocator} class="rank-row">
+            <span class="rank-num">{rank}</span>
+            <div class="rank-main">
+                <a class="rank-name" href={props.fw.repo_url} target="_blank" rel="noopener noreferrer">{props.fw.name}</a>
+                <span class="rank-meta">{props.fw.version_label}<span class="rank-meta-sep">·</span>{props.fw.p99_label}{" p99"}</span>
+                <span class="rank-track" aria-hidden="true">
+                    <span class="rank-fill" style={fill_style}></span>
+                </span>
+            </div>
+            <span class="rank-rps">{props.fw.rps_label}</span>
+        </div>
+    );
+}
+
+pub fn RankingPanel(allocator: zx.Allocator, props: struct { panel: Panel }) zx.Component {
+    const panel = props.panel;
+    const class = if (panel.active) "rank-panel rank-panel-active" else "rank-panel";
+    const panel_id = std.fmt.allocPrint(allocator, "rank-{s}-{s}", .{ panel.scenario.id, panel.platform.id }) catch unreachable;
+
+    if (panel.frameworks.len == 0) {
+        return (
+            <div
+                @allocator={allocator}
+                class={class}
+                id={panel_id}
+                data-scenario={panel.scenario.id}
+                data-platform={panel.platform.id}
+                hidden={!panel.active}
+            >
+                <div class="side-card-head">
+                    <h3 class="side-card-title">Ranking</h3>
+                    <p class="side-card-sub">{panel.scenario.label}</p>
+                </div>
+                <p class="rank-empty">No runs for this scenario yet.</p>
+            </div>
+        );
+    }
+
+    return (
+        <div
+            @allocator={allocator}
+            class={class}
+            id={panel_id}
+            data-scenario={panel.scenario.id}
+            data-platform={panel.platform.id}
+            hidden={!panel.active}
+        >
+            <div class="side-card-head">
+                <h3 class="side-card-title">Ranking</h3>
+                <p class="side-card-sub">{panel.scenario.label}{" · req/s"}</p>
+            </div>
+            <div class="rank-list">
+                {for (panel.frameworks, 0..) |fw, i| (
+                    <RankRow fw={fw} index={i} />
+                )}
+            </div>
+        </div>
+    );
+}
+
+const std = @import("std");
+const zx = @import("zx");
+const View = @import("../View.zig");

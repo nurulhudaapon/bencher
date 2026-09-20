@@ -6,9 +6,9 @@ static
 bench/.zig-cache/
 bench/zig-out/
 bench/compose.generated.yml
-bench/bencher/.zig-cache/
-bench/bencher/zig-out/
-bench/bencher/zig-pkg/
+bench/runner/.zig-cache/
+bench/runner/zig-out/
+bench/runner/zig-pkg/
 app/.bench-*.zon
 frameworks/*/.zig-cache/
 frameworks/*/zig-out/

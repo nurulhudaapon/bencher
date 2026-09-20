@@ -3,7 +3,7 @@ diff -ruN a/src/zinc/engine.zig b/src/zinc/engine.zig
 +++ b/src/zinc/engine.zig	2026-09-21 00:28:01
 @@ -72,6 +72,10 @@
      /// Non-null while a send is in flight. The bytes live in `arena`, so this is
-     /// an in-flight marker, not an owning pointer — never free it directly.
+     /// an in-flight marker, not an owning pointer - never free it directly.
      write_buffer: ?[]u8 = null,
 +
 +    /// When true, close the socket after the response write finishes instead of

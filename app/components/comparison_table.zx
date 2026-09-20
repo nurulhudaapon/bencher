@@ -43,7 +43,11 @@ pub fn ComparisonTable(allocator: zx.Allocator, props: struct {
     colspan: []const u8,
 }) zx.Component {
     return (
-        <div @allocator={allocator} class="table-wrap">
+        <div @allocator={allocator} class="table-wrap" id="feature-table">
+            <div class="table-intro">
+                <h2 class="table-intro-title">Feature matrix</h2>
+                <p class="table-intro-desc">Capability comparison across the same servers under test - separate from raw throughput.</p>
+            </div>
             <table class="table">
                 <thead>
                     <tr>

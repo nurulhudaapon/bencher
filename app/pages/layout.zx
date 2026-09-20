@@ -9,7 +9,11 @@ pub fn Layout(ctx: zx.LayoutContext, children: zx.Component) zx.Component {
                 <meta name="author" content="Nurul Huda (Apon)" />
                 <title>Zig Web Servers Benchmark</title>
                 <link rel="icon" href="favicon.svg" type="image/svg+xml" />
-                <style @escaping={.none}>{@embedFile("../assets/styles.css")}</style>            </head>
+                <link rel="preconnect" href="https://fonts.googleapis.com" />
+                <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+                <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+                <style @escaping={.none}>{@embedFile("../assets/styles.css")}</style>
+            </head>
             <body>
                 {children}
             </body>

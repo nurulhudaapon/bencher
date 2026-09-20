@@ -1,4 +1,4 @@
-# Zig 0.16 bencher image with zrk (load generator)
+# Zig 0.16 load-generator image (zrk). Built as zig_web_bench-bencher.
 ARG ZIG_VER=0.16.0
 
 FROM debian:12-slim AS build
@@ -13,16 +13,16 @@ RUN ARCH="$(uname -m)" \
     && rm /tmp/zig.tar.xz
 
 WORKDIR /build
-COPY bench/bencher/build.zig bench/bencher/build.zig.zon bench/bencher/
-COPY bench/bencher/src bench/bencher/src
-WORKDIR /build/bench/bencher
+COPY bench/runner/build.zig bench/runner/build.zig.zon bench/runner/
+COPY bench/runner/src bench/runner/src
+WORKDIR /build/bench/runner
 RUN zig build -Doptimize=ReleaseFast -Dcpu=baseline
 
 FROM debian:12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=build /build/bench/bencher/zig-out/bin/bencher /bin/bencher
-COPY bench/bencher/src/benchfig.zon /bench/benchfig.zon
+COPY --from=build /build/bench/runner/zig-out/bin/bencher /bin/bencher
+COPY bench/runner/src/benchfig.zon /bench/benchfig.zon
 WORKDIR /bench
 VOLUME ["/out"]
 ENTRYPOINT ["/bin/bencher"]

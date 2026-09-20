@@ -1,4 +1,5 @@
 const Framework = View.Framework;
+const TipRow = InfoTipMod.Row;
 
 pub fn BarColumn(allocator: zx.Allocator, props: struct { fw: Framework, index: usize }) zx.Component {
     const is_winner = props.index == 0;
@@ -7,11 +8,15 @@ pub fn BarColumn(allocator: zx.Allocator, props: struct { fw: Framework, index: 
     const title_class = if (is_winner) "tooltip-title tooltip-title-winner" else "tooltip-title";
     const height_style = std.fmt.allocPrint(allocator, "height: {s}", .{props.fw.height}) catch unreachable;
 
+    const tip_rows = allocator.alloc(TipRow, 2) catch unreachable;
+    tip_rows[0] = .{ .label = "Version", .value = props.fw.version_label };
+    tip_rows[1] = .{ .label = "Language", .value = props.fw.language_label };
+
     return (
         <div @allocator={allocator} class="bar-col">
             <div class="bar-stack">
                 <div class="bar-value">{props.fw.rps_label}</div>
-                <a class={bar_class} href={props.fw.repo_url} target="_blank" rel="noopener noreferrer" style={height_style}>
+                <div class={bar_class} style={height_style}>
                     {if (is_winner) (<div class="bar-bolt">{"⚡"}</div>)}
                     <div class="tooltip">
                         <div class="tooltip-arrow"></div>
@@ -27,20 +32,15 @@ pub fn BarColumn(allocator: zx.Allocator, props: struct { fw: Framework, index: 
                             <div class="tooltip-row"><span>Success rate:</span><span>{props.fw.success_label}</span></div>
                         </div>
                     </div>
-                </a>
+                </div>
             </div>
             <div class="bar-label">
-                <a class={name_class} href={props.fw.repo_url} target="_blank" rel="noopener noreferrer">
-                    <span class="bar-name-text">{props.fw.name}</span>
-                    <span class="name-tip">
-                        <span class="name-tip-arrow"></span>
-                        <span class="name-tip-title">{props.fw.name}</span>
-                        <span class="name-tip-rows">
-                            <span class="name-tip-row"><span>Version</span><span>{props.fw.version_label}</span></span>
-                            <span class="name-tip-row"><span>Language</span><span>{props.fw.language_label}</span></span>
-                        </span>
-                    </span>
-                </a>
+                <div class="info-tip-wrap">
+                    <a class={name_class} href={props.fw.repo_url} target="_blank" rel="noopener noreferrer">
+                        <span class="bar-name-text">{props.fw.name}</span>
+                    </a>
+                    <InfoTip title={props.fw.name} rows={tip_rows} placement={"above"} />
+                </div>
             </div>
         </div>
     );
@@ -49,3 +49,5 @@ pub fn BarColumn(allocator: zx.Allocator, props: struct { fw: Framework, index: 
 const std = @import("std");
 const zx = @import("zx");
 const View = @import("../View.zig");
+const InfoTipMod = @import("./info_tip.zx");
+const InfoTip = InfoTipMod.InfoTip;
