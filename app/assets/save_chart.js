@@ -3,6 +3,8 @@
 
 (function () {
   var busy = false;
+  /** Transparent gutter around the card so the drop shadow is visible in the PNG. */
+  var EXPORT_PAD = 24;
 
   function setBusy(on) {
     busy = on;
@@ -49,14 +51,55 @@
 
     var originalOverflow = root.style.overflow;
     var originalWidth = root.style.width;
+    var originalBoxShadow = root.style.boxShadow;
+    var originalBorderRadius = root.style.borderRadius;
+    var originalBackground = root.style.background;
     var githubEls = root.querySelectorAll(".github-info");
     var websiteUrl = root.querySelector(".website-url");
     var exportChrome = root.querySelectorAll(".export-chrome");
     var saveBtn = document.getElementById("save-png-btn");
+    var shell = null;
+    var parent = root.parentNode;
+    var nextSibling = root.nextSibling;
+    var barSnapshots = [];
+
+    function settleBars() {
+      // Snap bars to their final height so mid-animation frames are never exported.
+      // Inline styles also copy into the html-to-image clone (CSS alone can re-trigger).
+      root.querySelectorAll(".bar").forEach(function (bar) {
+        barSnapshots.push({
+          el: bar,
+          animation: bar.style.animation,
+          transform: bar.style.transform,
+          opacity: bar.style.opacity,
+        });
+        bar.style.animation = "none";
+        bar.style.transform = "none";
+        bar.style.opacity = "0.92";
+      });
+    }
+
+    function restoreBars() {
+      barSnapshots.forEach(function (snap) {
+        snap.el.style.animation = snap.animation;
+        snap.el.style.transform = snap.transform;
+        snap.el.style.opacity = snap.opacity;
+      });
+      barSnapshots = [];
+    }
 
     function restore() {
+      if (shell && shell.parentNode) {
+        parent.insertBefore(root, nextSibling);
+        shell.parentNode.removeChild(shell);
+        shell = null;
+      }
+      restoreBars();
       root.style.overflow = originalOverflow;
       root.style.width = originalWidth;
+      root.style.boxShadow = originalBoxShadow;
+      root.style.borderRadius = originalBorderRadius;
+      root.style.background = originalBackground;
       githubEls.forEach(function (el) {
         el.style.display = el.getAttribute("data-export-prev-display") || "";
         el.removeAttribute("data-export-prev-display");
@@ -81,8 +124,13 @@
         return wait(50);
       })
       .then(function () {
-        root.style.overflow = "hidden";
+        settleBars();
+
         root.style.width = "800px";
+        root.style.overflow = "hidden";
+        root.style.borderRadius = "0.85rem";
+        root.style.background = "#121820";
+        root.style.boxShadow = "0 16px 40px -12px rgba(0, 0, 0, 0.55)";
 
         githubEls.forEach(function (el) {
           el.setAttribute("data-export-prev-display", el.style.display || "");
@@ -98,26 +146,28 @@
         }
         if (saveBtn) saveBtn.style.visibility = "hidden";
 
+        // Padding on a wrapper (not the card) keeps a transparent gutter for the shadow.
+        // Applying padding on #export-root itself fails under border-box: it insets content
+        // instead of adding outer margin, so the PNG loses the soft edge.
+        shell = document.createElement("div");
+        shell.className = "export-shell";
+        shell.style.cssText =
+          "display:block;padding:" +
+          EXPORT_PAD +
+          "px;background:transparent;box-sizing:content-box;width:max-content;";
+        parent.insertBefore(shell, root);
+        shell.appendChild(root);
+
         return wait(100);
       })
       .then(function () {
         return import("https://esm.sh/html-to-image@1.11.13");
       })
       .then(function (mod) {
-        var width = root.offsetWidth;
-        var height = root.offsetHeight;
-        return mod.toPng(root, {
+        return mod.toPng(shell, {
           cacheBust: true,
           pixelRatio: 2,
           backgroundColor: null,
-          width: width + 32,
-          height: height + 32,
-          style: {
-            padding: "16px",
-            overflow: "visible",
-            width: width + "px",
-            height: height + "px",
-          },
           filter: function (node) {
             if (!node.classList) return true;
             return !node.classList.contains("export-loading-overlay");

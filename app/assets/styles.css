@@ -670,6 +670,14 @@ body.export-busy {
   }
 }
 
+/* Freeze grow animation for PNG capture (live page + html-to-image clone). */
+body.export-busy .bar,
+.export-shell .bar {
+  animation: none !important;
+  transform: none !important;
+  opacity: 0.92 !important;
+}
+
 .bar:hover {
   background: var(--bg-bar-hover);
   filter: brightness(1.06);

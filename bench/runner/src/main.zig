@@ -87,10 +87,12 @@ fn mainInner(init: std.process.Init) !void {
         out_path,
     });
 
-    const scenario_filter: ?[]const []const u8 = if (init.environ_map.get("BENCH_SCENARIOS")) |raw|
-        try splitCsv(gpa, raw)
-    else
-        null;
+    const scenario_filter: ?[]const []const u8 = blk: {
+        const raw = init.environ_map.get("BENCH_SCENARIOS") orelse break :blk null;
+        const trimmed = std.mem.trim(u8, raw, " \t\r\n");
+        if (trimmed.len == 0) break :blk null;
+        break :blk try splitCsv(gpa, trimmed);
+    };
     defer if (scenario_filter) |sf| {
         for (sf) |s| gpa.free(s);
         gpa.free(sf);
@@ -124,8 +126,6 @@ fn mainInner(init: std.process.Init) !void {
                 }
                 return err;
             };
-            // Brief settle after health - reduces OrbStack io_uring flakiness on first blast.
-            try Io.sleep(io, Io.Duration.fromSeconds(1), .awake);
 
             var run_i: u32 = 0;
             var sum = zeroResult(fw, scenario.id, platform_id);
@@ -431,7 +431,8 @@ fn waitHealthy(io: Io, host: []const u8, port: u16, path: []const u8) !void {
             std.log.info("healthy http://{s}:{d}{s}", .{ host, port, path });
             return;
         }
-        try Io.sleep(io, Io.Duration.fromSeconds(1), .awake);
+        // Compose already waited on /httpz; this is usually a quick confirm for the scenario path.
+        try Io.sleep(io, Io.Duration.fromMilliseconds(200), .awake);
     }
     return error.FrameworkNotHealthy;
 }

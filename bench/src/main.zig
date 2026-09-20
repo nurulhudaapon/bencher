@@ -7,6 +7,10 @@
 //!
 //! Discovers frameworks/*/Dockerfile and writes bench/compose.generated.yml.
 //! Usage: zig build run -- [zap httpz ...]   (default: all discovered)
+//!
+//! Speed knobs (env):
+//!   BENCH_SKIP_BUILD=1     never rebuild images
+//!   BENCH_FORCE_BUILD=1    always rebuild (overrides skip / cache detect)
 
 const std = @import("std");
 const Io = std.Io;
@@ -43,13 +47,12 @@ pub fn main(init: std.process.Init) !void {
     std.log.info("compose:    {s}", .{compose_path});
     std.log.info("output:     {s}", .{out_zon});
 
-    // CI pre-builds images with Buildx/GHA cache, then sets BENCH_SKIP_BUILD=1.
-    const skip_build = if (init.environ_map.get("BENCH_SKIP_BUILD")) |v|
-        v.len > 0 and !std.mem.eql(u8, v, "0") and !std.mem.eql(u8, v, "false")
-    else
-        false;
-    if (skip_build) {
-        std.log.info("BENCH_SKIP_BUILD set - using preloaded images", .{});
+    const force_build = envTruthy(init.environ_map.get("BENCH_FORCE_BUILD"));
+    const skip_build = envTruthy(init.environ_map.get("BENCH_SKIP_BUILD"));
+    if (skip_build and !force_build) {
+        std.log.info("BENCH_SKIP_BUILD set - using existing images", .{});
+    } else if (!force_build and try imagesReady(gpa, io, frameworks)) {
+        std.log.info("images already present - skipping docker build (BENCH_FORCE_BUILD=1 to rebuild)", .{});
     } else {
         var cmd: std.ArrayList([]const u8) = .empty;
         try cmd.appendSlice(arena, &.{ "docker", "compose", "-f", compose_path, "build" });
@@ -77,68 +80,63 @@ pub fn main(init: std.process.Init) !void {
     // Tear down any leftover project containers from interrupted runs.
     {
         var cmd: std.ArrayList([]const u8) = .empty;
-        try cmd.appendSlice(arena, &.{ "docker", "compose", "-f", compose_path, "down", "--remove-orphans" });
+        try cmd.appendSlice(arena, &.{ "docker", "compose", "-f", compose_path, "down", "--remove-orphans", "-t", "0" });
         runInDir(gpa, io, bench_dir, cmd.items) catch {};
     }
 
     for (frameworks) |fw| {
         std.log.info("── framework {s} ──", .{fw});
 
-        // Fresh container per scenario so a wedged server cannot poison later runs.
-        const scenarios = [_][]const u8{ "plaintext", "json" };
-        for (scenarios) |scenario| {
-            {
-                var cmd: std.ArrayList([]const u8) = .empty;
-                try cmd.appendSlice(arena, &.{ "docker", "compose", "-f", compose_path, "up", "-d", "--wait", "--force-recreate", fw });
-                try runInDir(gpa, io, bench_dir, cmd.items);
-            }
+        // One container for all scenarios: recreate/stop per scenario was the main local bottleneck.
+        {
+            var cmd: std.ArrayList([]const u8) = .empty;
+            try cmd.appendSlice(arena, &.{ "docker", "compose", "-f", compose_path, "up", "-d", "--wait", "--force-recreate", fw });
+            try runInDir(gpa, io, bench_dir, cmd.items);
+        }
 
-            {
-                const env_fw = try std.fmt.allocPrint(arena, "BENCH_FRAMEWORKS={s}", .{fw});
-                const env_sc = try std.fmt.allocPrint(arena, "BENCH_SCENARIOS={s}", .{scenario});
-                var cmd: std.ArrayList([]const u8) = .empty;
-                try cmd.appendSlice(arena, &.{
-                    "docker",         "compose",
-                    "-f",             compose_path,
-                    "run",            "--rm",
-                    "--no-deps",      "-e",
-                    env_fw,           "-e",
-                    env_sc,
-                });
-                if (init.environ_map.get("BENCH_PLATFORM")) |plat| {
-                    const env_pl = try std.fmt.allocPrint(arena, "BENCH_PLATFORM={s}", .{plat});
-                    try cmd.appendSlice(arena, &.{ "-e", env_pl });
-                }
-                try cmd.appendSlice(arena, &.{
-                    "-v",             volume,
-                    "bencher",        "/out/results.zon",
-                });
-                // OrbStack + zio/io_uring occasionally SIGBUS/SIGTRAP under load.
-                var attempt: u32 = 0;
-                while (true) : (attempt += 1) {
-                    runInDir(gpa, io, bench_dir, cmd.items) catch |err| {
-                        if (attempt + 1 >= 4) return err;
-                        std.log.warn("bencher {s}/{s} failed ({s}); retry {d}/3", .{ fw, scenario, @errorName(err), attempt + 1 });
-                        {
-                            var recreate: std.ArrayList([]const u8) = .empty;
-                            try recreate.appendSlice(arena, &.{ "docker", "compose", "-f", compose_path, "up", "-d", "--wait", "--force-recreate", fw });
-                            runInDir(gpa, io, bench_dir, recreate.items) catch |re| {
-                                std.log.warn("recreate {s} failed: {s}", .{ fw, @errorName(re) });
-                            };
-                        }
-                        continue;
-                    };
-                    break;
-                }
+        {
+            const env_fw = try std.fmt.allocPrint(arena, "BENCH_FRAMEWORKS={s}", .{fw});
+            var cmd: std.ArrayList([]const u8) = .empty;
+            try cmd.appendSlice(arena, &.{
+                "docker",         "compose",
+                "-f",             compose_path,
+                "run",            "--rm",
+                "--no-deps",      "-e",
+                env_fw,
+            });
+            if (init.environ_map.get("BENCH_PLATFORM")) |plat| {
+                const env_pl = try std.fmt.allocPrint(arena, "BENCH_PLATFORM={s}", .{plat});
+                try cmd.appendSlice(arena, &.{ "-e", env_pl });
             }
-
-            {
-                var cmd: std.ArrayList([]const u8) = .empty;
-                try cmd.appendSlice(arena, &.{ "docker", "compose", "-f", compose_path, "stop", fw });
+            try cmd.appendSlice(arena, &.{
+                "-v",             volume,
+                "bencher",        "/out/results.zon",
+            });
+            // OrbStack + zio/io_uring occasionally SIGBUS/SIGTRAP under load.
+            var attempt: u32 = 0;
+            while (true) : (attempt += 1) {
                 runInDir(gpa, io, bench_dir, cmd.items) catch |err| {
-                    std.log.warn("stop {s} failed: {s}", .{ fw, @errorName(err) });
+                    if (attempt + 1 >= 4) return err;
+                    std.log.warn("bencher {s} failed ({s}); retry {d}/3", .{ fw, @errorName(err), attempt + 1 });
+                    {
+                        var recreate: std.ArrayList([]const u8) = .empty;
+                        try recreate.appendSlice(arena, &.{ "docker", "compose", "-f", compose_path, "up", "-d", "--wait", "--force-recreate", fw });
+                        runInDir(gpa, io, bench_dir, recreate.items) catch |re| {
+                            std.log.warn("recreate {s} failed: {s}", .{ fw, @errorName(re) });
+                        };
+                    }
+                    continue;
                 };
+                break;
             }
+        }
+
+        {
+            var cmd: std.ArrayList([]const u8) = .empty;
+            try cmd.appendSlice(arena, &.{ "docker", "compose", "-f", compose_path, "stop", "-t", "0", fw });
+            runInDir(gpa, io, bench_dir, cmd.items) catch |err| {
+                std.log.warn("stop {s} failed: {s}", .{ fw, @errorName(err) });
+            };
         }
     }
 
@@ -157,11 +155,42 @@ pub fn main(init: std.process.Init) !void {
 
     {
         var cmd: std.ArrayList([]const u8) = .empty;
-        try cmd.appendSlice(arena, &.{ "docker", "compose", "-f", compose_path, "down", "--remove-orphans" });
+        try cmd.appendSlice(arena, &.{ "docker", "compose", "-f", compose_path, "down", "--remove-orphans", "-t", "0" });
         runInDir(gpa, io, bench_dir, cmd.items) catch {};
     }
 
     std.log.info("done → {s}", .{out_zon});
+}
+
+fn envTruthy(raw: ?[]const u8) bool {
+    const v = raw orelse return false;
+    if (v.len == 0) return false;
+    if (std.mem.eql(u8, v, "0") or std.mem.eql(u8, v, "false") or std.mem.eql(u8, v, "no")) return false;
+    return true;
+}
+
+fn imagesReady(gpa: std.mem.Allocator, io: Io, frameworks: []const []const u8) !bool {
+    for (frameworks) |fw| {
+        const tag = try std.fmt.allocPrint(gpa, "zig_web_bench-{s}", .{fw});
+        defer gpa.free(tag);
+        if (!try dockerImageExists(gpa, io, tag)) return false;
+    }
+    return try dockerImageExists(gpa, io, "zig_web_bench-bencher");
+}
+
+fn dockerImageExists(gpa: std.mem.Allocator, io: Io, tag: []const u8) !bool {
+    _ = gpa;
+    var child = try std.process.spawn(io, .{
+        .argv = &.{ "docker", "image", "inspect", tag },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+    });
+    const term = try child.wait(io);
+    return switch (term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
 }
 
 fn discoverFrameworks(arena: std.mem.Allocator, io: Io, frameworks_dir: []const u8) ![]const []const u8 {
@@ -238,10 +267,10 @@ fn writeCompose(
         \\
         \\x-healthcheck: &healthcheck
         \\  test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/httpz"]
-        \\  interval: 1s
+        \\  interval: 500ms
         \\  timeout: 2s
-        \\  retries: 30
-        \\  start_period: 2s
+        \\  retries: 40
+        \\  start_period: 0s
         \\
         \\services:
         \\
