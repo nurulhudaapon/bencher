@@ -1,0 +1,17 @@
+.{
+    .name = .bench_zinc,
+    .version = "0.1.0",
+    .fingerprint = 0x6df68f904ca5e6a1,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        // Populated at Docker build time under deps/ (aio patched for Zig 0.17).
+        .zinc = .{
+            .path = "deps/zinc",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "main.zig",
+    },
+}

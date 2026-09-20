@@ -1,0 +1,17 @@
+.{
+    .name = .bench_zap,
+    .version = "0.1.0",
+    .fingerprint = 0x16d7bc3b284bf867,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .zap = .{
+            .url = "git+https://github.com/zigzap/zap?ref=master#f6099ecec496c7ec623c5913baa5b6b5da2e883d",
+            .hash = "zap-0.10.6-GoeB8y-IJAD3m9zkAkeTQalzU1NuvO072u8hA78Irdp8",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "main.zig",
+    },
+}

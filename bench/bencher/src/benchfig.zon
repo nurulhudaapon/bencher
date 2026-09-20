@@ -1,0 +1,27 @@
+.{
+    .runs = 2,
+    .connections = 32,
+    .threads = 1,
+    .duration_s = 8,
+    // Keep modest for OrbStack/io_uring stability (higher rates → SIGBUS/SIGTRAP).
+    .rate = 50000,
+    .port = 8081,
+    .timeout_s = 2,
+    .frameworks = .{ "zap", "httpz", "zzz", "zinc", "std" },
+    .scenarios = .{
+        .{
+            .id = "plaintext",
+            .label = "Plaintext",
+            .description = "Minimal OK response — peak request throughput",
+            .path = "/httpz",
+            .method = "GET",
+        },
+        .{
+            .id = "json",
+            .label = "JSON",
+            .description = "Serialize a small JSON user list",
+            .path = "/api/users",
+            .method = "GET",
+        },
+    },
+}

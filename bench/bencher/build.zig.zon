@@ -1,0 +1,21 @@
+.{
+    .name = .bencher,
+    .version = "0.1.0",
+    .fingerprint = 0x36a898f030a7162b,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .zrk = .{
+            .url = "git+https://github.com/zoxy-io/zrk?ref=main#916fa060bda0d80148310a88ee46d49e122e016c",
+            .hash = "zrk-1.1.1-WqdFO9QUBADM-VLxl9wu86oId06h4w2vDK3nV9eXdQuo",
+        },
+        .zio = .{
+            .url = "git+https://github.com/lalinsky/zio#a8a88c0e85ba87525ec9555aa409544873443142",
+            .hash = "zio-0.16.0-xHbVVGNDIwDYoZmY7GkL3RMCKuyc4JjK2hv_4TOBx8x2",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

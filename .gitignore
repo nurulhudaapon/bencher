@@ -1,2 +1,16 @@
 zig-out/
 .zig-cache/
+zig-pkg/
+static
+bench/.zig-cache/
+bench/zig-out/
+bench/compose.generated.yml
+bench/bencher/.zig-cache/
+bench/bencher/zig-out/
+bench/bencher/zig-pkg/
+app/.bench-runs.ndjson
+app/.bench-*.tsv
+frameworks/*/.zig-cache/
+frameworks/*/zig-out/
+frameworks/*/zig-pkg/
+frameworks/zinc/deps/

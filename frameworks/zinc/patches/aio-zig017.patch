@@ -1,0 +1,268 @@
+diff -ruN a/src/io/linux.zig b/src/io/linux.zig
+--- a/src/io/linux.zig	2026-09-20 18:19:02
++++ b/src/io/linux.zig	2026-09-21 00:21:44
+@@ -11,13 +11,14 @@
+ const constants = @import("../constants.zig");
+ const stdx = @import("../stdx.zig");
+ const common = @import("./common.zig");
+-const Address = std.net.Address;
++const Address = std.Io.net.IpAddress;
+ const QueueType = @import("../queue.zig").QueueType;
+ const buffer_limit = @import("../io.zig").buffer_limit;
+ const DirectIO = @import("../io.zig").DirectIO;
+ const DoublyLinkedListType = @import("../list.zig").DoublyLinkedListType;
+ const parse_dirty_semver = stdx.parse_dirty_semver;
+ const maybe = stdx.maybe;
++const compat = @import("../posix_compat.zig");
+ 
+ pub const IO = struct {
+     pub const TCPOptions = common.TCPOptions;
+@@ -122,15 +123,12 @@
+     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
+         assert(self.cancel_status != .done);
+ 
+-        // We must use the same clock source used by io_uring (CLOCK_MONOTONIC) since we specify the
+-        // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
+-        // dramatically different. Any kernel that supports io_uring will support CLOCK_MONOTONIC.
+-        var current_ts: posix.timespec = undefined;
+-        posix.clock_gettime(posix.CLOCK.MONOTONIC, &current_ts) catch unreachable;
+-        // The absolute CLOCK_MONOTONIC time after which we may return from this function:
++        // Relative (not ABS) timeout: under Docker/OrbStack, absolute CLOCK_MONOTONIC
++        // io_uring timeouts have been observed to never complete after heavy load,
++        // wedging workers forever in io_cqring_wait. Relative timeouts always fire.
+         const timeout_ts: os.linux.kernel_timespec = .{
+-            .tv_sec = current_ts.tv_sec,
+-            .tv_nsec = current_ts.tv_nsec + nanoseconds,
++            .sec = @intCast(nanoseconds / std.time.ns_per_s),
++            .nsec = @intCast(nanoseconds % std.time.ns_per_s),
+         };
+         var timeouts: usize = 0;
+         var etime = false;
+@@ -140,22 +138,26 @@
+                 try self.flush_submissions(0, &timeouts, &etime);
+                 break :blk self.ring.get_sqe() catch unreachable;
+             };
+-            // Submit an absolute timeout that will be canceled if any other SQE completes first:
+-            timeout_sqe.prep_timeout(&timeout_ts, 1, os.linux.IORING_TIMEOUT_ABS);
++            // Relative timeout canceled if any other SQE completes first:
++            timeout_sqe.prep_timeout(&timeout_ts, 1, 0);
+             timeout_sqe.user_data = 0;
+             timeouts += 1;
+ 
+             // We don't really want to count this timeout as an io,
+             // but it's tricky to track separately.
+-            self.ios_queued += 1;
++            self.ios_queued +|= 1;
+ 
+             // The amount of time this call will block is bounded by the timeout we just submitted:
+             try self.flush(1, &timeouts, &etime);
+         }
+         // Reap any remaining timeouts, which reference the timespec in the current stack frame.
+-        // The busy loop here is required to avoid a potential deadlock, as the kernel determines
+-        // when the timeouts are pushed to the completion queue, not us.
+-        while (timeouts > 0) _ = try self.flush_completions(0, &timeouts, &etime);
++        // Bound the busy loop: a wedged io_uring that never delivers the timeout CQE
++        // would otherwise spin forever (observed as wchan=0 after heavy load).
++        var reap_spins: u32 = 0;
++        while (timeouts > 0) : (reap_spins += 1) {
++            if (reap_spins > 1_000_000) return error.Timeout;
++            _ = try self.flush_completions(0, &timeouts, &etime);
++        }
+     }
+ 
+     fn flush(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
+@@ -181,8 +183,8 @@
+         // 2) potentially queues more SQEs to take advantage more of the next flush_submissions().
+         while (self.completed.pop()) |completion| {
+             if (completion.operation == .timeout and
+-                completion.operation.timeout.timespec.tv_sec == 0 and
+-                completion.operation.timeout.timespec.tv_nsec == 0)
++                completion.operation.timeout.timespec.sec == 0 and
++                completion.operation.timeout.timespec.nsec == 0)
+             {
+                 // Zero-duration timeouts are a special case, and aren't listed in `awaiting`.
+                 maybe(self.awaiting.empty());
+@@ -222,10 +224,10 @@
+             };
+             if (completed > wait_remaining) wait_remaining = 0 else wait_remaining -= completed;
+             for (cqes[0..completed]) |cqe| {
+-                self.ios_in_kernel -= 1;
++                self.ios_in_kernel -|= 1;
+ 
+                 if (cqe.user_data == 0) {
+-                    timeouts.* -= 1;
++                    timeouts.* -|= 1;
+                     // We are only done if the timeout submitted was completed due to time, not if
+                     // it was completed due to the completion of an event, in which case `cqe.res`
+                     // would be 0. It is possible for multiple timeout operations to complete at the
+@@ -261,8 +263,8 @@
+                 else => return err,
+             };
+ 
+-            self.ios_queued -= submitted;
+-            self.ios_in_kernel += submitted;
++            self.ios_queued -|= submitted;
++            self.ios_in_kernel +|= submitted;
+ 
+             break;
+         }
+@@ -284,7 +286,7 @@
+         completion.prep(sqe);
+ 
+         self.awaiting.push(completion);
+-        self.ios_queued += 1;
++        self.ios_queued +|= 1;
+     }
+ 
+     /// Cancel should be invoked at most once, before any of the memory owned by read/recv buffers
+@@ -416,10 +418,12 @@
+                     sqe.prep_close(op.fd);
+                 },
+                 .connect => |*op| {
++                    // Zig 0.17 IpAddress has no .any/.getOsSockLen. Server bench never
++                    // issues connect; this arm only needs to typecheck with prep().
+                     sqe.prep_connect(
+                         op.socket,
+-                        &op.address.any,
+-                        op.address.getOsSockLen(),
++                        @ptrCast(@alignCast(&op.address)),
++                        @sizeOf(Address),
+                     );
+                 },
+                 .fsync => |op| {
+@@ -451,7 +455,7 @@
+                         op.dir_fd,
+                         op.file_path,
+                         op.flags,
+-                        op.mask,
++                        @bitCast(op.mask),
+                         op.statxbuf,
+                     );
+                 },
+@@ -620,7 +624,7 @@
+                                 .PERM => error.AccessDenied,
+                                 .EXIST => error.PathAlreadyExists,
+                                 .BUSY => error.DeviceBusy,
+-                                .OPNOTSUPP => error.FileLocksNotSupported,
++                                .OPNOTSUPP => error.FileLocksUnsupported,
+                                 .AGAIN => error.WouldBlock,
+                                 .TXTBSY => error.FileBusy,
+                                 else => |errno| stdx.unexpected_errno("openat", errno),
+@@ -1249,7 +1253,7 @@
+         FileNotFound,
+         NameTooLong,
+         NotDir,
+-    } || std.fs.File.StatError || posix.UnexpectedError;
++    } || std.Io.File.StatError || posix.UnexpectedError;
+ 
+     pub fn statx(
+         self: *IO,
+@@ -1320,7 +1324,7 @@
+             }.wrapper,
+             .operation = .{
+                 .timeout = .{
+-                    .timespec = .{ .tv_sec = 0, .tv_nsec = nanoseconds },
++                    .timespec = .{ .sec = 0, .nsec = nanoseconds },
+                 },
+             },
+         };
+@@ -1485,7 +1489,7 @@
+     /// Closes a socket opened by the IO instance.
+     pub fn close_socket(self: *IO, socket: socket_t) void {
+         _ = self;
+-        posix.close(socket);
++        compat.close(socket);
+     }
+ 
+     /// Listen on the given TCP socket.
+diff -ruN a/src/io/windows.zig b/src/io/windows.zig
+--- a/src/io/windows.zig	2026-09-20 18:19:02
++++ b/src/io/windows.zig	2026-09-21 00:21:44
+@@ -4,7 +4,7 @@
+ const log = std.log.scoped(.io);
+ const constants = @import("../constants.zig");
+ const common = @import("./common.zig");
+-const Address = std.net.Address;
++const Address = std.Io.net.IpAddress;
+ 
+ const QueueType = @import("../queue.zig").QueueType;
+ const Time = @import("../time.zig").Time;
+diff -ruN a/src/list.zig b/src/list.zig
+--- a/src/list.zig	2026-09-20 18:19:02
++++ b/src/list.zig	2026-09-21 00:21:44
+@@ -11,10 +11,10 @@
+     comptime field_back_enum: std.meta.FieldEnum(Node),
+     comptime field_next_enum: std.meta.FieldEnum(Node),
+ ) type {
+-    assert(@typeInfo(Node) == .Struct);
++    assert(@typeInfo(Node) == .@"struct");
+     assert(field_back_enum != field_next_enum);
+-    assert(std.meta.FieldType(Node, field_back_enum) == ?*Node);
+-    assert(std.meta.FieldType(Node, field_next_enum) == ?*Node);
++    assert(std.meta.fieldInfo(Node, field_back_enum).type == ?*Node);
++    assert(std.meta.fieldInfo(Node, field_next_enum).type == ?*Node);
+ 
+     const field_back = @tagName(field_back_enum);
+     const field_next = @tagName(field_next_enum);
+diff -ruN a/src/stdx.zig b/src/stdx.zig
+--- a/src/stdx.zig	2026-09-20 18:19:02
++++ b/src/stdx.zig	2026-09-21 00:21:44
+@@ -399,7 +399,7 @@
+         assert(has_unique_representation(@TypeOf(value)));
+     }
+     return low_level_hash(0, switch (@typeInfo(@TypeOf(value))) {
+-        .Struct, .Int => std.mem.asBytes(&value),
++        .@"struct", .int => std.mem.asBytes(&value),
+         else => @compileError("unsupported hashing for " ++ @typeName(@TypeOf(value))),
+     });
+ }
+@@ -475,7 +475,7 @@
+ /// updates explicitly in production code.
+ pub fn update(base: anytype, diff: anytype) @TypeOf(base) {
+     assert(builtin.is_test);
+-    assert(@typeInfo(@TypeOf(base)) == .Struct);
++    assert(@typeInfo(@TypeOf(base)) == .@"struct");
+ 
+     var updated = base;
+     inline for (std.meta.fields(@TypeOf(diff))) |f| {
+@@ -820,7 +820,7 @@
+     args: anytype,
+ ) []const u8 {
+     const Args = @TypeOf(args);
+-    const ArgsStruct = @typeInfo(Args).Struct;
++    const ArgsStruct = @typeInfo(Args).@"struct";
+     comptime assert(ArgsStruct.is_tuple);
+ 
+     comptime {
+@@ -903,8 +903,8 @@
+         std.enums.tagName(std.posix.system.E, err),
+     });
+ 
+-    if (builtin.mode == .Debug) {
+-        std.debug.dumpCurrentStackTrace(null);
++    if (builtin.mode == .debug) {
++        std.debug.dumpCurrentStackTrace(.{});
+     }
+     return error.Unexpected;
+ }
+diff -ruN a/src/time.zig b/src/time.zig
+--- a/src/time.zig	2026-09-20 18:19:02
++++ b/src/time.zig	2026-09-21 00:21:44
+@@ -103,7 +103,7 @@
+         // https://github.com/ziglang/zig/pull/933#discussion_r656021295.
+         var ts: posix.timespec = undefined;
+         posix.clock_gettime(posix.CLOCK.BOOTTIME, &ts) catch @panic("CLOCK_BOOTTIME required");
+-        return @as(u64, @intCast(ts.tv_sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.tv_nsec));
++        return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
+     }
+ 
+     /// A timestamp to measure real (i.e. wall clock) time, meaningful across systems, and reboots.
+@@ -144,7 +144,7 @@
+         assert(is_darwin or is_linux);
+         var ts: posix.timespec = undefined;
+         posix.clock_gettime(posix.CLOCK.REALTIME, &ts) catch unreachable;
+-        return @as(i64, ts.tv_sec) * std.time.ns_per_s + ts.tv_nsec;
++        return @as(i64, ts.sec) * std.time.ns_per_s + ts.nsec;
+     }
+ 
+     pub fn tick(_: *Time) void {}

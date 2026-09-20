@@ -1,0 +1,47 @@
+//! Client-side "Save as PNG" control.
+//! Zig/Ziex owns the button + click; capture runs through zx.client.js → window.__benchSaveChart.
+
+pub fn SaveChartButton(ctx: *zx.ComponentContext) zx.Component {
+    return (
+        <button
+            @allocator={ctx.allocator}
+            type="button"
+            class="save-png-btn"
+            id="save-png-btn"
+            aria-label="Save chart as PNG"
+            onclick={ctx.bind(onSave)}
+        >
+            <span class="save-png-label" data-save-idle>
+                <svg
+                    class="save-png-icon"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    width="16"
+                    height="16"
+                    aria-hidden="true"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                    />
+                </svg>
+                {" Save as PNG"}
+            </span>
+            <span class="save-png-label" data-save-busy hidden>
+                {"Saving..."}
+            </span>
+        </button>
+    );
+}
+
+fn onSave(_: *zx.client.Event) void {
+    const js = zx.client.js;
+    js.global.call(void, "__benchSaveChart", .{}) catch |err| {
+        zx.log.err("save chart failed to start: {s}", .{@errorName(err)});
+    };
+}
+
+const zx = @import("zx");

@@ -1,0 +1,833 @@
+const results = @import("../results.zon");
+const frameworks_raw = results.frameworks;
+const comparison_raw = results.comparison;
+const scenarios_raw = results.scenarios;
+const platforms_raw = results.platforms;
+const runs_raw = results.runs;
+const meta = results.meta;
+
+const fw_len = @typeInfo(@TypeOf(frameworks_raw)).@"struct".field_names.len;
+const scenario_len = @typeInfo(@TypeOf(scenarios_raw)).@"struct".field_names.len;
+const platform_len = @typeInfo(@TypeOf(platforms_raw)).@"struct".field_names.len;
+
+const FrameworkMeta = struct {
+    name: []const u8,
+    version: []const u8,
+    version_label: []const u8,
+    language_label: []const u8,
+    repo_url: []const u8,
+};
+
+const Framework = struct {
+    name: []const u8,
+    version: []const u8,
+    version_label: []const u8,
+    language_label: []const u8,
+    repo_url: []const u8,
+    rps: f64,
+    rps_label: []const u8,
+    height: []const u8,
+    average_label: []const u8,
+    fastest_label: []const u8,
+    slowest_label: []const u8,
+    p50_label: []const u8,
+    p95_label: []const u8,
+    p99_label: []const u8,
+    success_label: []const u8,
+};
+
+const Scenario = struct {
+    id: []const u8,
+    label: []const u8,
+    description: []const u8,
+    path: []const u8,
+    method: []const u8,
+};
+
+const Platform = struct {
+    id: []const u8,
+    label: []const u8,
+    os: []const u8,
+    arch: []const u8,
+};
+
+const SwitchOption = struct {
+    id: []const u8,
+    label: []const u8,
+};
+
+const os_options = [_]SwitchOption{
+    .{ .id = "linux", .label = "Linux" },
+    .{ .id = "macos", .label = "macOS" },
+    .{ .id = "windows", .label = "Windows" },
+};
+
+const arch_options = [_]SwitchOption{
+    .{ .id = "x86_64", .label = "x86" },
+    .{ .id = "aarch64", .label = "Arm" },
+};
+
+const Run = struct {
+    framework: []const u8,
+    scenario: []const u8,
+    platform: []const u8,
+    rps: f64,
+    average: f64,
+    fastest: f64,
+    slowest: f64,
+    success_rate: f64,
+    latency_p50: f64,
+    latency_p95: f64,
+    latency_p99: f64,
+};
+
+const FeatureCell = struct {
+    value: []const u8,
+    status: []const u8,
+};
+
+const FeatureRow = struct {
+    name: []const u8,
+    description: []const u8,
+    cells: [fw_len]FeatureCell,
+};
+
+const Category = struct {
+    name: []const u8,
+    description: []const u8,
+    features: []const FeatureRow,
+};
+
+fn formatInt(n: u64) []const u8 {
+    if (n >= 1_000_000) {
+        const millions = n / 1_000_000;
+        const thousands = (n / 1000) % 1000;
+        const rem = n % 1000;
+        return std.fmt.comptimePrint("{d},{d:0>3},{d:0>3}", .{ millions, thousands, rem });
+    }
+    if (n >= 1000) {
+        return std.fmt.comptimePrint("{d},{d:0>3}", .{ n / 1000, n % 1000 });
+    }
+    return std.fmt.comptimePrint("{d}", .{n});
+}
+
+fn formatRps(allocator: zx.Allocator, rps: f64) []const u8 {
+    const n: u64 = @intFromFloat(@round(rps));
+    if (n >= 1_000_000) {
+        return std.fmt.allocPrint(allocator, "{d},{d:0>3},{d:0>3}", .{ n / 1_000_000, (n / 1000) % 1000, n % 1000 }) catch unreachable;
+    }
+    if (n >= 1000) {
+        return std.fmt.allocPrint(allocator, "{d},{d:0>3}", .{ n / 1000, n % 1000 }) catch unreachable;
+    }
+    return std.fmt.allocPrint(allocator, "{d}", .{n}) catch unreachable;
+}
+
+fn formatMs(allocator: zx.Allocator, seconds: f64) []const u8 {
+    return std.fmt.allocPrint(allocator, "{d:.2} ms", .{seconds * 1000.0}) catch unreachable;
+}
+
+fn formatPct(allocator: zx.Allocator, rate: f64) []const u8 {
+    return std.fmt.allocPrint(allocator, "{d:.1}%", .{rate * 100.0}) catch unreachable;
+}
+
+fn barHeight(allocator: zx.Allocator, rps: f64, max: f64) []const u8 {
+    if (max <= 0) return "0%";
+    return std.fmt.allocPrint(allocator, "{d:.2}%", .{(rps / max) * 100.0}) catch unreachable;
+}
+
+fn languageLabel() []const u8 {
+    inline for (@typeInfo(@TypeOf(frameworks_raw)).@"struct".field_names) |name| {
+        const d = @field(frameworks_raw, name);
+        if (std.mem.eql(u8, d.name, "std")) {
+            return std.fmt.comptimePrint("Zig {s}", .{d.version});
+        }
+    }
+    return "Zig 0.16.0";
+}
+
+fn versionLabel(comptime version: []const u8) []const u8 {
+    if (std.mem.eql(u8, version, "master")) return "master";
+    return std.fmt.comptimePrint("v{s}", .{version});
+}
+
+fn loadFrameworkMetas() [fw_len]FrameworkMeta {
+    const lang = languageLabel();
+    var out: [fw_len]FrameworkMeta = undefined;
+    inline for (@typeInfo(@TypeOf(frameworks_raw)).@"struct".field_names, 0..) |name, i| {
+        const d = @field(frameworks_raw, name);
+        out[i] = .{
+            .name = d.name,
+            .version = d.version,
+            .version_label = versionLabel(d.version),
+            .language_label = lang,
+            .repo_url = d.repo_url,
+        };
+    }
+    return out;
+}
+
+fn loadScenarios() [scenario_len]Scenario {
+    var out: [scenario_len]Scenario = undefined;
+    inline for (@typeInfo(@TypeOf(scenarios_raw)).@"struct".field_names, 0..) |name, i| {
+        const d = @field(scenarios_raw, name);
+        out[i] = .{
+            .id = d.id,
+            .label = d.label,
+            .description = d.description,
+            .path = d.path,
+            .method = d.method,
+        };
+    }
+    return out;
+}
+
+fn loadPlatforms() [platform_len]Platform {
+    var out: [platform_len]Platform = undefined;
+    inline for (@typeInfo(@TypeOf(platforms_raw)).@"struct".field_names, 0..) |name, i| {
+        const d = @field(platforms_raw, name);
+        out[i] = .{
+            .id = d.id,
+            .label = d.label,
+            .os = d.os,
+            .arch = d.arch,
+        };
+    }
+    return out;
+}
+
+fn loadRunsArr() [@typeInfo(@TypeOf(runs_raw)).@"struct".field_names.len]Run {
+    @setEvalBranchQuota(200000);
+    const n = @typeInfo(@TypeOf(runs_raw)).@"struct".field_names.len;
+    var out: [n]Run = undefined;
+    inline for (@typeInfo(@TypeOf(runs_raw)).@"struct".field_names, 0..) |name, i| {
+        const d = @field(runs_raw, name);
+        out[i] = .{
+            .framework = d.framework,
+            .scenario = d.scenario,
+            .platform = d.platform,
+            .rps = d.rps,
+            .average = d.average,
+            .fastest = d.fastest,
+            .slowest = d.slowest,
+            .success_rate = d.success_rate,
+            .latency_p50 = d.latency_p50,
+            .latency_p95 = d.latency_p95,
+            .latency_p99 = d.latency_p99,
+        };
+    }
+    return out;
+}
+
+fn metaFor(name: []const u8) FrameworkMeta {
+    for (framework_metas) |m| {
+        if (std.mem.eql(u8, m.name, name)) return m;
+    }
+    return .{
+        .name = name,
+        .version = "0",
+        .version_label = "v0",
+        .language_label = languageLabel(),
+        .repo_url = "#",
+    };
+}
+
+fn buildFrameworks(
+    allocator: zx.Allocator,
+    scenario_id: []const u8,
+    platform_id: []const u8,
+) []const Framework {
+    var list: std.ArrayList(Framework) = .empty;
+    var max: f64 = 0;
+
+    for (all_runs) |run| {
+        if (!std.mem.eql(u8, run.scenario, scenario_id)) continue;
+        if (!std.mem.eql(u8, run.platform, platform_id)) continue;
+        const m = metaFor(run.framework);
+        list.append(allocator, .{
+            .name = m.name,
+            .version = m.version,
+            .version_label = m.version_label,
+            .language_label = m.language_label,
+            .repo_url = m.repo_url,
+            .rps = run.rps,
+            .rps_label = "",
+            .height = "",
+            .average_label = formatMs(allocator, run.average),
+            .fastest_label = formatMs(allocator, run.fastest),
+            .slowest_label = formatMs(allocator, run.slowest),
+            .p50_label = formatMs(allocator, run.latency_p50),
+            .p95_label = formatMs(allocator, run.latency_p95),
+            .p99_label = formatMs(allocator, run.latency_p99),
+            .success_label = formatPct(allocator, run.success_rate),
+        }) catch unreachable;
+        if (run.rps > max) max = run.rps;
+    }
+
+    const items = list.toOwnedSlice(allocator) catch unreachable;
+    std.sort.pdq(Framework, items, {}, struct {
+        fn lessThan(_: void, a: Framework, b: Framework) bool {
+            return a.rps > b.rps;
+        }
+    }.lessThan);
+
+    for (items) |*fw| {
+        fw.rps_label = formatRps(allocator, fw.rps);
+        fw.height = barHeight(allocator, fw.rps, max);
+    }
+    return items;
+}
+
+const framework_metas = loadFrameworkMetas();
+const scenarios = loadScenarios();
+const platforms = loadPlatforms();
+const all_runs_arr = loadRunsArr();
+const all_runs: []const Run = &all_runs_arr;
+
+fn scenarioHasRuns(id: []const u8) bool {
+    for (all_runs) |run| {
+        if (std.mem.eql(u8, run.scenario, id)) return true;
+    }
+    return false;
+}
+
+fn countRunnableScenarios() usize {
+    var n: usize = 0;
+    for (scenarios) |sc| {
+        if (scenarioHasRuns(sc.id)) n += 1;
+    }
+    return n;
+}
+
+const runnable_scenario_len = countRunnableScenarios();
+
+fn loadRunnableScenarios() [runnable_scenario_len]Scenario {
+    var out: [runnable_scenario_len]Scenario = undefined;
+    var i: usize = 0;
+    for (scenarios) |sc| {
+        if (!scenarioHasRuns(sc.id)) continue;
+        out[i] = sc;
+        i += 1;
+    }
+    return out;
+}
+
+const runnable_scenarios = loadRunnableScenarios();
+
+fn osLabel(id: []const u8) []const u8 {
+    for (os_options) |opt| {
+        if (std.mem.eql(u8, opt.id, id)) return opt.label;
+    }
+    return id;
+}
+
+fn archLabel(id: []const u8) []const u8 {
+    for (arch_options) |opt| {
+        if (std.mem.eql(u8, opt.id, id)) return opt.label;
+    }
+    return id;
+}
+
+fn cellFor(feature: anytype, fw_name: []const u8) FeatureCell {
+    const T = @TypeOf(feature);
+    inline for (@typeInfo(T).@"struct".field_names) |name| {
+        if (std.mem.eql(u8, name, "name") or std.mem.eql(u8, name, "description"))
+            continue;
+        if (std.mem.eql(u8, name, fw_name)) {
+            const cell = @field(feature, name);
+            return .{ .value = cell.value, .status = cell.status };
+        }
+    }
+    return .{ .value = "—", .status = "error" };
+}
+
+fn countFeatures(comptime category: anytype) usize {
+    return @typeInfo(@TypeOf(category.features)).@"struct".field_names.len;
+}
+
+fn loadFeatureRows(comptime category: anytype) [countFeatures(category)]FeatureRow {
+    @setEvalBranchQuota(100000);
+    var rows: [countFeatures(category)]FeatureRow = undefined;
+    inline for (@typeInfo(@TypeOf(category.features)).@"struct".field_names, 0..) |feat_name, i| {
+        const feature = @field(category.features, feat_name);
+        var cells: [fw_len]FeatureCell = undefined;
+        for (framework_metas, 0..) |fw, j| {
+            cells[j] = cellFor(feature, fw.name);
+        }
+        rows[i] = .{
+            .name = feature.name,
+            .description = feature.description,
+            .cells = cells,
+        };
+    }
+    return rows;
+}
+
+const core_features = loadFeatureRows(@field(comparison_raw, "0"));
+const dx_features = loadFeatureRows(@field(comparison_raw, "1"));
+
+const categories = [_]Category{
+    .{
+        .name = @field(comparison_raw, "0").category,
+        .description = @field(comparison_raw, "0").description,
+        .features = &core_features,
+    },
+    .{
+        .name = @field(comparison_raw, "1").category,
+        .description = @field(comparison_raw, "1").description,
+        .features = &dx_features,
+    },
+};
+
+const tool_label = meta.tool;
+const mode_label = meta.mode;
+const platform_label = meta.platform.label;
+const threads_label = std.fmt.comptimePrint("{d}", .{meta.config.threads});
+const connections_label = std.fmt.comptimePrint("{d}", .{meta.config.connections});
+const duration_label = std.fmt.comptimePrint("{d}s", .{meta.config.duration_s});
+const rate_label = formatInt(meta.config.rate);
+const runs_label = std.fmt.comptimePrint("{d}", .{meta.config.runs});
+const colspan_label = std.fmt.comptimePrint("{d}", .{fw_len + 1});
+const default_platform = platforms[0].id;
+const default_os = platforms[0].os;
+const default_arch = platforms[0].arch;
+
+fn StatusIcon(allocator: zx.Allocator, props: struct { status: []const u8 }) zx.Component {
+    if (std.mem.eql(u8, props.status, "success")) {
+        return (
+            <div @allocator={allocator} class="status status-success" aria-label="success">
+                <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            </div>
+        );
+    }
+    if (std.mem.eql(u8, props.status, "warning")) {
+        return (
+            <div @allocator={allocator} class="status status-warning" aria-label="warning">
+                <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            </div>
+        );
+    }
+    return (
+        <div @allocator={allocator} class="status status-error" aria-label="error">
+            <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+        </div>
+    );
+}
+
+fn ZigLogo(allocator: zx.Allocator) zx.Component {
+    return (
+        <svg @allocator={allocator} class="zig-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 153 140" aria-hidden="true">
+            <g fill="#f7a41d">
+                <g>
+                    <polygon points="46,22 28,44 19,30" />
+                    <polygon points="46,22 33,33 28,44 22,44 22,95 31,95 20,100 12,117 0,117 0,22" />
+                    <polygon points="31,95 12,117 4,106" />
+                </g>
+                <g>
+                    <polygon points="56,22 62,36 37,44" />
+                    <polygon points="56,22 111,22 111,44 37,44 56,32" />
+                    <polygon points="116,95 97,117 90,104" />
+                    <polygon points="116,95 100,104 97,117 42,117 42,95" />
+                    <polygon points="150,0 52,117 3,140 101,22" />
+                </g>
+                <g>
+                    <polygon points="141,22 140,40 122,45" />
+                    <polygon points="153,22 153,117 106,117 120,105 125,95 131,95 131,45 122,45 132,36 141,22" />
+                    <polygon points="125,95 130,110 106,117" />
+                </g>
+            </g>
+        </svg>
+    );
+}
+
+fn GitHubIcon(allocator: zx.Allocator) zx.Component {
+    return (
+        <svg @allocator={allocator} class="github-icon" fill="currentColor" role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <title>GitHub</title>
+            <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
+        </svg>
+    );
+}
+
+fn BarColumn(allocator: zx.Allocator, props: struct { fw: Framework, index: usize }) zx.Component {
+    const is_winner = props.index == 0;
+    const name_class = if (is_winner) "bar-name bar-name-winner" else "bar-name";
+    const bar_class = if (is_winner) "bar bar-winner" else "bar";
+    const title_class = if (is_winner) "tooltip-title tooltip-title-winner" else "tooltip-title";
+    const height_style = std.fmt.allocPrint(allocator, "height: {s}", .{props.fw.height}) catch unreachable;
+
+    return (
+        <div @allocator={allocator} class="bar-col">
+            <div class="bar-stack">
+                <div class="bar-value">{props.fw.rps_label}</div>
+                <a class={bar_class} href={props.fw.repo_url} target="_blank" rel="noopener noreferrer" style={height_style}>
+                    {if (is_winner) (<div class="bar-bolt">{"⚡"}</div>)}
+                    <div class="tooltip">
+                        <div class="tooltip-arrow"></div>
+                        <div class={title_class}>{props.fw.name}</div>
+                        <div class="tooltip-rows">
+                            <div class="tooltip-row"><span>Req/sec:</span><span>{props.fw.rps_label}</span></div>
+                            <div class="tooltip-row"><span>Avg latency:</span><span>{props.fw.average_label}</span></div>
+                            <div class="tooltip-row"><span>Fastest:</span><span>{props.fw.fastest_label}</span></div>
+                            <div class="tooltip-row"><span>Slowest:</span><span>{props.fw.slowest_label}</span></div>
+                            <div class="tooltip-row"><span>P50:</span><span>{props.fw.p50_label}</span></div>
+                            <div class="tooltip-row"><span>P95:</span><span>{props.fw.p95_label}</span></div>
+                            <div class="tooltip-row"><span>P99:</span><span>{props.fw.p99_label}</span></div>
+                            <div class="tooltip-row"><span>Success rate:</span><span>{props.fw.success_label}</span></div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="bar-label">
+                <a class={name_class} href={props.fw.repo_url} target="_blank" rel="noopener noreferrer">
+                    <span class="bar-name-text">{props.fw.name}</span>
+                    <span class="name-tip">
+                        <span class="name-tip-arrow"></span>
+                        <span class="name-tip-title">{props.fw.name}</span>
+                        <span class="name-tip-rows">
+                            <span class="name-tip-row"><span>Version</span><span>{props.fw.version_label}</span></span>
+                            <span class="name-tip-row"><span>Language</span><span>{props.fw.language_label}</span></span>
+                        </span>
+                    </span>
+                </a>
+            </div>
+        </div>
+    );
+}
+
+fn ChartPanelView(
+    allocator: zx.Allocator,
+    props: struct {
+        scenario: Scenario,
+        platform: Platform,
+        active: bool,
+    },
+) zx.Component {
+    const frameworks = buildFrameworks(allocator, props.scenario.id, props.platform.id);
+    const class = if (props.active) "chart-panel chart-panel-active" else "chart-panel";
+    const title = std.fmt.allocPrint(allocator, "HTTP requests per second · {s}", .{props.scenario.label}) catch unreachable;
+    const panel_id = std.fmt.allocPrint(allocator, "panel-{s}-{s}", .{ props.scenario.id, props.platform.id }) catch unreachable;
+
+    if (frameworks.len == 0) {
+        return (
+            <div
+                @allocator={allocator}
+                class={class}
+                id={panel_id}
+                data-scenario={props.scenario.id}
+                data-platform={props.platform.id}
+                hidden={!props.active}
+            >
+                <h2 class="chart-title">{title}</h2>
+                <div class="chart-empty">
+                    <p class="chart-empty-title">No results yet</p>
+                    <p class="chart-empty-desc">This scenario is configured for future runs. Re-run the Docker bench once the endpoint is implemented.</p>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div
+            @allocator={allocator}
+            class={class}
+            id={panel_id}
+            data-scenario={props.scenario.id}
+            data-platform={props.platform.id}
+            hidden={!props.active}
+        >
+            <h2 class="chart-title">{title}</h2>
+            <div class="chart-inner">
+                <div class="bars">
+                    {for (frameworks, 0..) |fw, i| (
+                        <BarColumn fw={fw} index={i} />
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+fn FeatureRowView(allocator: zx.Allocator, props: struct { row: FeatureRow }) zx.Component {
+    return (
+        <tr @allocator={allocator} class="feature-row">
+            <td>
+                <div class="feature-name">{props.row.name}</div>
+                <div class="feature-desc">{props.row.description}</div>
+            </td>
+            {for (props.row.cells) |cell| (
+                <td class="cell">
+                    <div class="cell-inner">
+                        <StatusIcon status={cell.status} />
+                        <span class="cell-value">{cell.value}</span>
+                    </div>
+                </td>
+            )}
+        </tr>
+    );
+}
+
+fn CategoryView(allocator: zx.Allocator, props: struct { category: Category }) zx.Component {
+    return (
+        <fragment @allocator={allocator}>
+            <tr class="category-row">
+                <td colspan={colspan_label}>
+                    <h3 class="category-title">{props.category.name}</h3>
+                    <p class="category-desc">{props.category.description}</p>
+                </td>
+            </tr>
+            {for (props.category.features) |row| (
+                <FeatureRowView row={row} />
+            )}
+        </fragment>
+    );
+}
+
+const bench_script =
+    \\(function () {
+    \\  var root = document.getElementById("bench-root");
+    \\  if (!root) return;
+    \\  var scenario = root.getAttribute("data-default-scenario") || "plaintext";
+    \\  var os = root.getAttribute("data-default-os") || "linux";
+    \\  var arch = root.getAttribute("data-default-arch") || "aarch64";
+    \\
+    \\  function platformId() { return os + "-" + arch; }
+    \\
+    \\  function sync() {
+    \\    var platform = platformId();
+    \\    root.querySelectorAll("[data-scenario-tab]").forEach(function (tab) {
+    \\      var id = tab.getAttribute("data-scenario-tab");
+    \\      var on = id === scenario;
+    \\      tab.classList.toggle("seg-btn-active", on);
+    \\      tab.setAttribute("aria-pressed", on ? "true" : "false");
+    \\    });
+    \\    root.querySelectorAll("[data-os-btn]").forEach(function (btn) {
+    \\      var on = btn.getAttribute("data-os-btn") === os;
+    \\      btn.classList.toggle("plat-opt-active", on);
+    \\      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    \\    });
+    \\    root.querySelectorAll("[data-arch-btn]").forEach(function (btn) {
+    \\      var on = btn.getAttribute("data-arch-btn") === arch;
+    \\      btn.classList.toggle("plat-opt-active", on);
+    \\      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    \\    });
+    \\    var osCurrent = root.querySelector("[data-os-current]");
+    \\    var archCurrent = root.querySelector("[data-arch-current]");
+    \\    var osActive = root.querySelector('[data-os-btn="' + os + '"]');
+    \\    var archActive = root.querySelector('[data-arch-btn="' + arch + '"]');
+    \\    if (osCurrent && osActive) osCurrent.textContent = osActive.textContent.trim();
+    \\    if (archCurrent && archActive) archCurrent.textContent = archActive.textContent.trim();
+    \\    root.querySelectorAll(".chart-panel").forEach(function (panel) {
+    \\      var match = panel.getAttribute("data-scenario") === scenario &&
+    \\                  panel.getAttribute("data-platform") === platform;
+    \\      panel.classList.toggle("chart-panel-active", match);
+    \\      if (match) panel.removeAttribute("hidden");
+    \\      else panel.setAttribute("hidden", "");
+    \\    });
+    \\  }
+    \\
+    \\  root.querySelectorAll("[data-scenario-tab]").forEach(function (tab) {
+    \\    tab.addEventListener("click", function () {
+    \\      scenario = tab.getAttribute("data-scenario-tab");
+    \\      sync();
+    \\    });
+    \\  });
+    \\  root.querySelectorAll("[data-os-btn]").forEach(function (btn) {
+    \\    btn.addEventListener("click", function () {
+    \\      os = btn.getAttribute("data-os-btn");
+    \\      sync();
+    \\      btn.blur();
+    \\    });
+    \\  });
+    \\  root.querySelectorAll("[data-arch-btn]").forEach(function (btn) {
+    \\    btn.addEventListener("click", function () {
+    \\      arch = btn.getAttribute("data-arch-btn");
+    \\      sync();
+    \\      btn.blur();
+    \\    });
+    \\  });
+    \\  root.querySelectorAll(".plat-side").forEach(function (side) {
+    \\    side.addEventListener("mouseleave", function () {
+    \\      var focused = side.querySelector(":focus");
+    \\      if (focused) focused.blur();
+    \\    });
+    \\  });
+    \\
+    \\  sync();
+    \\})();
+;
+
+const save_chart_script = @embedFile("../assets/save_chart.js");
+
+pub fn Page(ctx: zx.PageContext) !zx.Component {
+    const allocator = ctx.arena;
+    const initial_scenario = runnable_scenarios[0];
+
+    return (
+        <div
+            @allocator={allocator}
+            class="page"
+            id="bench-root"
+            data-default-scenario={initial_scenario.id}
+            data-default-platform={default_platform}
+            data-default-os={default_os}
+            data-default-arch={default_arch}
+        >
+            <div class="panel" id="export-root">
+                <div class="header">
+                    <div class="header-title">
+                        <ZigLogo />
+                        Zig Web Frameworks
+                    </div>
+                    <div class="header-actions">
+                        <a class="github-info" href="https://github.com/nurulhudaapon/bench-zig-web-frameworks" target="_blank" rel="noopener noreferrer" aria-label="GitHub repository">
+                            <GitHubIcon />
+                        </a>
+                        <a class="github-info" href="https://github.com/nurulhudaapon/bench-zig-web-frameworks" target="_blank" rel="noopener noreferrer">
+                            <img
+                                src="https://img.shields.io/github/stars/nurulhudaapon/bench-zig-web-frameworks?style=social&cacheSeconds=60"
+                                alt="GitHub stars"
+                                width="88"
+                                height="20"
+                            />
+                        </a>
+                        <div class="website-url" hidden>
+                            <span>zigweb.nuhu.dev</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart">
+                    <SaveChartButton @rendering={.client} />
+
+                    <div class="bench-controls export-chrome">
+                        <div class="control-row" aria-label="Test kind">
+                            <div class="seg" role="group" aria-label="Test kind">
+                                {for (runnable_scenarios) |sc| (
+                                    <button
+                                        type="button"
+                                        class={if (std.mem.eql(u8, sc.id, initial_scenario.id)) "seg-btn seg-btn-active" else "seg-btn"}
+                                        data-scenario-tab={sc.id}
+                                        aria-pressed={if (std.mem.eql(u8, sc.id, initial_scenario.id)) "true" else "false"}
+                                    >
+                                        {sc.label}
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        <div class="control-row" aria-label="Platform">
+                            <div class="plat-pill" role="group" aria-label="OS and architecture">
+                                <div class="plat-side plat-os">
+                                    <span class="plat-current" data-os-current>{osLabel(default_os)}</span>
+                                    <div class="plat-menu" role="group" aria-label="Operating system">
+                                        {for (os_options) |opt| (
+                                            <button
+                                                type="button"
+                                                class={if (std.mem.eql(u8, opt.id, default_os)) "plat-opt plat-opt-active" else "plat-opt"}
+                                                data-os-btn={opt.id}
+                                                aria-pressed={if (std.mem.eql(u8, opt.id, default_os)) "true" else "false"}
+                                            >
+                                                {opt.label}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                                <span class="plat-slash" aria-hidden="true">{"/"}</span>
+                                <div class="plat-side plat-arch">
+                                    <span class="plat-current" data-arch-current>{archLabel(default_arch)}</span>
+                                    <div class="plat-menu" role="group" aria-label="CPU architecture">
+                                        {for (arch_options) |opt| (
+                                            <button
+                                                type="button"
+                                                class={if (std.mem.eql(u8, opt.id, default_arch)) "plat-opt plat-opt-active" else "plat-opt"}
+                                                data-arch-btn={opt.id}
+                                                aria-pressed={if (std.mem.eql(u8, opt.id, default_arch)) "true" else "false"}
+                                            >
+                                                {opt.label}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {for (runnable_scenarios) |sc| (
+                        for (platforms) |pl| (
+                            <ChartPanelView
+                                scenario={sc}
+                                platform={pl}
+                                active={std.mem.eql(u8, sc.id, initial_scenario.id) and std.mem.eql(u8, pl.id, default_platform)}
+                            />
+                        )
+                    )}
+
+                    <div class="machine">
+                        <div class="machine-wrap">
+                            <div class="machine-trigger">
+                                <div class="machine-line">
+                                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    <span>{platform_label}{" • "}{tool_label}{" • "}{mode_label}</span>
+                                </div>
+                            </div>
+                            <div class="machine-tooltip">
+                                <div class="machine-tooltip-arrow"></div>
+                                <div class="machine-tooltip-title">Benchmark Environment</div>
+
+                                <div class="machine-section">
+                                    <div class="machine-section-label">Load Generator</div>
+                                    <div class="machine-grid-2">
+                                        <div class="machine-kv"><dt>Tool:</dt><dd>{tool_label}</dd></div>
+                                        <div class="machine-kv"><dt>Mode:</dt><dd>{mode_label}</dd></div>
+                                        <div class="machine-kv"><dt>Threads:</dt><dd>{threads_label}</dd></div>
+                                        <div class="machine-kv"><dt>Connections:</dt><dd>{connections_label}</dd></div>
+                                        <div class="machine-kv"><dt>Duration:</dt><dd>{duration_label}</dd></div>
+                                        <div class="machine-kv"><dt>Target rate:</dt><dd>{rate_label}</dd></div>
+                                        <div class="machine-kv"><dt>Runs:</dt><dd>{runs_label}</dd></div>
+                                    </div>
+                                </div>
+
+                                <div class="machine-section">
+                                    <div class="machine-section-label">Primary Platform</div>
+                                    <div class="machine-kv"><dt>Label:</dt><dd>{platform_label}</dd></div>
+                                    <div class="machine-kv"><dt>OS:</dt><dd>{meta.platform.os}{" / "}{meta.platform.arch}</dd></div>
+                                    <div class="machine-kv"><dt>Kernel:</dt><dd>{meta.platform.os_version}</dd></div>
+                                    <div class="machine-kv"><dt>Host:</dt><dd>{meta.platform.hostname}</dd></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="spacer"></div>
+
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Feature</th>
+                            {for (framework_metas) |fw| (
+                                <th class="center">{fw.name}</th>
+                            )}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {for (categories) |category| (
+                            <CategoryView category={category} />
+                        )}
+                    </tbody>
+                </table>
+            </div>
+
+            <script @escaping={.none}>{bench_script}</script>
+            <script @escaping={.none}>{save_chart_script}</script>
+        </div>
+    );
+}
+
+const std = @import("std");
+const zx = @import("zx");
+pub const SaveChartButton = @import("./save_chart.zx").SaveChartButton;

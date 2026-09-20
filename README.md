@@ -1,78 +1,26 @@
 ### Zig Web Framework Benchmark
 
-This is a benchmark suite for Zig web frameworks.
-
-**🌐 View Live Results:** [https://zigweb.nuhu.dev/](https://zigweb.nuhu.dev/)
+This is a benchmark suite for Zig web server libraries.
 
 ### Prerequisites
 
 - Docker (for Docker mode)
-- [oha](https://github.com/hatoo/oha) - HTTP load testing tool
-- Zig compiler (for local mode)
+- Zig compiler (0.17+ for the site / host orchestrator)
 
 ### Running the benchmarks
 
-
-
-#### Option 1: Local Mode (default)
-
-Build the binaries locally:
 ```bash
-./scripts/build.sh
+zig build run -- httpz zap          # frameworks only
+BENCH_PLATFORM=linux-x86_64 zig build run
 ```
 
-Run the benchmarks locally (without Docker):
-```bash
-./scripts/bench.sh
-```
+Results are written to `app/results.zon` (imported by the site).
 
-#### Option 2: Docker Mode
+### Server Libraries
 
-Build the Docker images for each framework:
-```bash
-MODE=docker ./scripts/build.sh
-```
-
-Run the benchmarks in Docker containers:
-```bash
-MODE=docker ./scripts/bench.sh
-```
-
-### Frameworks
-
-- [Zig Standard Library HTTP Server](https://ziglang.org/documentation/master/std/#std.http.Server)
+- [Zig Standard Library HTTP Server](https://github.com/ziglang/zig)
 - [Zap](https://github.com/zigzap/zap)
 - [HTTPz](https://github.com/karlseguin/http.zig)
-- [Zinc](https://github.com/zon-dev/zinc)
 - [zzz](https://github.com/tardy-org/zzz)
-
-### Benchmark Methodology
-
-The benchmarks measure raw HTTP performance by sending 1,000,000 requests with 100 concurrent connections to a simple `/httpz` endpoint that returns "OK". This provides a baseline comparison of each framework's request handling capability.
-
-**Current Test:**
-- Simple text response endpoint (`/httpz` → "OK")
-
-**Planned Tests:**
-- JSON serialization/deserialization
-- Route parameter parsing
-- Query parameter handling
-- Static file serving
-- Template rendering
-
-**Note on Comparisons:**
-The comparison is not strictly apple-to-apple due to architectural differences between frameworks (e.g., pure Zig vs C bindings, threading models). However, the goal is to keep the tests as fair as possible by using idiomatic patterns for each framework and testing within their intended use cases.
-
-### Results
-
-```
-std      │██████████████████████████████ 72,092 req/s
-zap      │██████████████████████████████████████████████████ 121,333 req/s
-httpz    │██████████████████████████████████████████████████ 120,582 req/s
-zinc     │█████████ 20,837 req/s
-zzz      │██████████████████████████████████████ 92,190 req/s
-```
-*Machine: Raspberry Pi 5 Model B Rev 1.0 @ 2400MHz (4 cores / 4 physical), L3: 2048KB, 7GB RAM, Linux aarch64, Governor: ondemand, Mode: local*
-
-*Last updated: 2025-10-26T11:21:57Z*
+- [Zinc](https://github.com/zon-dev/zinc/)
 

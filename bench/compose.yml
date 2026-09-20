@@ -1,0 +1,31 @@
+# Generated at runtime by `zig build run` from frameworks/*/Dockerfile.
+# Kept only as a fallback reference — prefer compose.generated.yml.
+name: zig_web_bench
+
+services:
+  bencher:
+    image: zig_web_bench-bencher
+    build:
+      context: ..
+      dockerfile: bench/Dockerfile.bench
+      args:
+        ZIG_VER: "0.16.0"
+    privileged: true
+    cpuset: "2,3"
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+    environment:
+      BENCH_FRAMEWORKS: ${BENCH_FRAMEWORKS:-}
+      BENCH_SCENARIOS: ${BENCH_SCENARIOS:-}
+      BENCH_PLATFORM: ${BENCH_PLATFORM:-}
+    volumes:
+      - ../app:/out
+    networks:
+      - bench-net
+
+networks:
+  bench-net:
+    driver: bridge

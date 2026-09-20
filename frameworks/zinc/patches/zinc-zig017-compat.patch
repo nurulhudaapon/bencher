@@ -1,0 +1,46 @@
+diff -ruN a/build.zig b/build.zig
+--- a/build.zig	2026-09-20 18:34:12
++++ b/build.zig	2026-09-21 00:28:01
+@@ -11,10 +11,16 @@
+     });
+ 
+     // Add url dependency
+-    const url = b.dependency("url", .{});
++    const url = b.dependency("url", .{
++        .target = target,
++        .optimize = optimize,
++    });
+     module.addImport("url", url.module("url"));
+ 
+-    const aio_dep = b.dependency("aio", .{});
++    const aio_dep = b.dependency("aio", .{
++        .target = target,
++        .optimize = optimize,
++    });
+     module.addImport("aio", aio_dep.module("aio"));
+ 
+     // Add tests
+diff -ruN a/src/zinc/server.zig b/src/zinc/server.zig
+--- a/src/zinc/server.zig	2026-09-20 18:34:12
++++ b/src/zinc/server.zig	2026-09-21 00:28:01
+@@ -25,7 +25,7 @@
+ pub fn listen(address: Io.net.IpAddress, options: ListenOptions) !Server {
+     // Convert IpAddress to sockaddr for posix operations
+     // Use a larger buffer to accommodate both IPv4 and IPv6 (sockaddr.in6 is 28 bytes)
+-    var sockaddr_buffer: [128]u8 = undefined;
++    var sockaddr_buffer: [128]u8 align(@alignOf(posix.sockaddr)) = undefined;
+     var socklen: posix.socklen_t = undefined;
+     var family: posix.sa_family_t = undefined;
+     const sockaddr: *posix.sockaddr = @ptrCast(&sockaddr_buffer);
+diff -ruN a/src/zinc/posix_compat.zig b/src/zinc/posix_compat.zig
+--- a/src/zinc/posix_compat.zig	2026-09-20 18:34:12
++++ b/src/zinc/posix_compat.zig	2026-09-21 00:28:01
+@@ -47,7 +47,7 @@
+     const rc = system.socket(@intCast(domain), @intCast(filtered_type), @intCast(protocol));
+     if (rc >= 0) {
+         if (!sock_flags_in_type and extra_flags != 0) applyDescriptorFlags(rc, extra_flags);
+-        return rc;
++        return @intCast(rc);
+     }
+     return switch (errno(rc)) {
+         .ACCES => error.PermissionDenied,

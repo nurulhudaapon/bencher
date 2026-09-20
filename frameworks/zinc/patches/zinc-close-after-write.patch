@@ -1,0 +1,48 @@
+diff -ruN a/src/zinc/engine.zig b/src/zinc/engine.zig
+--- a/src/zinc/engine.zig	2026-09-20 18:34:12
++++ b/src/zinc/engine.zig	2026-09-21 00:28:01
+@@ -72,6 +72,10 @@
+     /// Non-null while a send is in flight. The bytes live in `arena`, so this is
+     /// an in-flight marker, not an owning pointer — never free it directly.
+     write_buffer: ?[]u8 = null,
++
++    /// When true, close the socket after the response write finishes instead of
++    /// re-arming keep-alive reads. Set from `sendAsync` when `Connection: close`.
++    close_after_write: bool = false,
+ 
+     // Each connection has its own read buffer from the pool
+     read_buffer: ?[]u8 = null,
+@@ -705,6 +709,10 @@
+     // Inline send completed inside `handleConn`. Re-arm here so the arena is
+     // not reset while request/response objects on that arena are still live.
+     if (connection.write_buffer == null) {
++        if (connection.close_after_write) {
++            closeConnectionWorker(worker, connection);
++            return;
++        }
+         _ = connection.arena.reset(.{ .retain_with_limit = engine.arena_retain_limit });
+         startReadWorker(worker, connection) catch |err| {
+             std.log.err("Failed to continue reading: {}", .{err});
+@@ -733,6 +741,11 @@
+             return;
+         }
+         connection.write_buffer = null;
++    }
++
++    if (connection.close_after_write) {
++        closeConnectionWorker(worker, connection);
++        return;
+     }
+ 
+     _ = connection.arena.reset(.{ .retain_with_limit = engine.arena_retain_limit });
+diff -ruN a/src/zinc/response.zig b/src/zinc/response.zig
+--- a/src/zinc/response.zig	2026-09-20 18:34:12
++++ b/src/zinc/response.zig	2026-09-21 00:28:01
+@@ -264,6 +264,7 @@
+         buf.appendSliceAssumeCapacity(content);
+     }
+ 
++    connection.close_after_write = !keep_alive;
+     try engine.startWrite(connection, buf.items);
+ }
+ 

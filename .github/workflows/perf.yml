@@ -1,0 +1,128 @@
+name: perf
+
+on:
+  schedule:
+    # Weekly Sunday 06:00 UTC
+    - cron: "0 6 * * 0"
+  push:
+    branches: [main]
+    paths:
+      - "bench/**"
+      - "frameworks/**"
+      - ".github/workflows/perf.yml"
+      - ".github/workflows/cd.yml"
+  pull_request:
+    paths:
+      - "bench/**"
+      - "frameworks/**"
+      - ".github/workflows/**"
+  # Run from any branch via Actions → perf → Run workflow (deploy still main-only).
+  workflow_dispatch:
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bench:
+    name: bench (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux-x86_64
+          - runner: ubuntu-24.04-arm
+            platform: linux-aarch64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          # Host orchestrator (bench/src) uses Zig 0.17 process.Init / Io APIs.
+          version: 0.17.0-dev.2131+d08989840
+
+      - name: Docker info
+        run: |
+          docker version
+          uname -a
+
+      - name: Run benchmarks
+        env:
+          BENCH_PLATFORM: ${{ matrix.platform }}
+        run: |
+          cd bench
+          zig build run
+
+      - name: List platform partials
+        if: always()
+        run: ls -la app/.bench-*-${{ matrix.platform }}.tsv || true
+
+      - name: Upload platform partials
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: bench-partials-${{ matrix.platform }}
+          path: app/.bench-*-${{ matrix.platform }}.tsv
+          # Partials are dotfiles (.bench-*.tsv); excluded by default since v4.4.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  merge:
+    name: merge results
+    needs: [bench]
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download all platform partials
+        uses: actions/download-artifact@v5
+        with:
+          pattern: bench-partials-*
+          path: _partials
+          merge-multiple: false
+
+      - name: Collect partials into app/
+        run: |
+          mkdir -p app
+          find _partials -type f -name '.bench-*.tsv' -print -exec cp -v {} app/ \;
+          ls -la app/.bench-*.tsv || {
+            echo "No platform partials found — cannot merge"
+            exit 1
+          }
+
+      - name: Build bencher and merge results.zon
+        run: |
+          docker build -f bench/Dockerfile.bench -t zig_web_bench-bencher .
+          docker run --rm \
+            -v "$(pwd)/app:/out" \
+            zig_web_bench-bencher --merge /out/results.zon
+          test -f app/results.zon
+          head -40 app/results.zon
+
+      - name: Upload merged results
+        uses: actions/upload-artifact@v5
+        with:
+          name: results-zon
+          path: app/results.zon
+          retention-days: 30
+
+  deploy:
+    name: deploy pages
+    needs: [merge]
+    if: github.ref == 'refs/heads/main' && needs.merge.result == 'success'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/cd.yml
+    with:
+      results_artifact: results-zon

@@ -1,0 +1,68 @@
+name: pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "app/**/*"
+      - "build.zig"
+      - "build.zig.zon"
+      - ".github/workflows/cd.yml"
+
+  workflow_dispatch:
+
+  workflow_call:
+    inputs:
+      results_artifact:
+        description: "Optional artifact name containing app/results.zon from the perf merge job"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download merged bench results
+        if: ${{ inputs.results_artifact != '' }}
+        uses: actions/download-artifact@v5
+        with:
+          name: ${{ inputs.results_artifact }}
+          path: app
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0-dev.2131+d08989840
+
+      - name: Build static site
+        run: zig build zx -- export --outdir zig-out/static
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: zig-out/static
+
+  deploy:
+    needs: [build]
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
