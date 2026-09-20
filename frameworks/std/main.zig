@@ -51,10 +51,32 @@ fn handleConnection(io: std.Io, stream: net.Stream) void {
                 return;
             },
         };
-        req.respond("OK", .{}) catch |err| {
-            std.debug.print("Error responding: {}\n", .{err});
-            return;
-        };
+
+        const target = req.head.target;
+        const path = if (std.mem.indexOfScalar(u8, target, '?')) |i| target[0..i] else target;
+
+        if (std.mem.eql(u8, path, "/api/users")) {
+            var buf: [256]u8 = undefined;
+            var w: std.Io.Writer = .fixed(&buf);
+            std.json.Stringify.value(shared_mod.response.users, .{}, &w) catch {
+                std.debug.print("Error encoding JSON\n", .{});
+                return;
+            };
+            req.respond(w.buffered(), .{
+                .extra_headers = &.{
+                    .{ .name = "content-type", .value = "application/json" },
+                },
+            }) catch |err| {
+                std.debug.print("Error responding: {}\n", .{err});
+                return;
+            };
+        } else {
+            req.respond("OK", .{}) catch |err| {
+                std.debug.print("Error responding: {}\n", .{err});
+                return;
+            };
+        }
+
         if (!req.head.keep_alive) break;
     }
 }

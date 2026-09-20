@@ -1,3 +1,5 @@
+const github_url = "https://github.com/zig-bd/bench";
+
 pub fn Header(allocator: zx.Allocator) zx.Component {
     return (
         <div @allocator={allocator} class="header">
@@ -7,12 +9,12 @@ pub fn Header(allocator: zx.Allocator) zx.Component {
             </div>
             <div class="header-actions">
                 <SaveChartButton @rendering={.client} />
-                <a class="github-info" href="https://github.com/nurulhudaapon/bench-zig-web-frameworks" target="_blank" rel="noopener noreferrer" aria-label="GitHub repository">
+                <a class="github-info" href={github_url} target="_blank" rel="noopener noreferrer" aria-label="GitHub repository">
                     <GitHubIcon />
                 </a>
-                <a style="display: none;" class="github-info github-stars" href="https://github.com/nurulhudaapon/bench-zig-web-frameworks" target="_blank" rel="noopener noreferrer">
+                <a style="display: none;" class="github-info github-stars" href={github_url} target="_blank" rel="noopener noreferrer">
                     <img
-                        src="https://img.shields.io/github/stars/nurulhudaapon/bench-zig-web-frameworks?style=flat&label=Stars&labelColor=111827&color=f7a41d&cacheSeconds=60"
+                        src=`https://img.shields.io/{github_url["https://".len..]}/stars?style=flat&label=Stars&labelColor=111827&color=f7a41d&cacheSeconds=60`
                         alt="GitHub stars"
                         width="86"
                         height="20"

@@ -29,6 +29,7 @@ pub fn main(init: std.process.Init) !void {
 
     var router: Router = try .init(init.gpa, &.{
         Route.init("/httpz").get({}, httpz).layer(),
+        Route.init("/api/users").get({}, users).layer(),
     }, .{});
     defer router.deinit(init.gpa);
 
@@ -65,5 +66,14 @@ fn httpz(ctx: *const Context, _: void) !Respond {
         .status = .OK,
         .mime = http.Mime.TEXT,
         .body = "OK",
+    });
+}
+
+fn users(ctx: *const Context, _: void) !Respond {
+    const body = try std.json.Stringify.valueAlloc(ctx.allocator, shared_mod.response.users, .{});
+    return ctx.response.apply(.{
+        .status = .OK,
+        .mime = http.Mime.JSON,
+        .body = body,
     });
 }

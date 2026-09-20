@@ -110,14 +110,6 @@ fn mainInner(init: std.process.Init) !void {
         };
         if (scenario_wanted) {
             for (frameworks) |fw| {
-            // JSON scenario is not implemented on std/zzz (plaintext-only).
-            if (std.mem.eql(u8, scenario.id, "json") and
-                (std.mem.eql(u8, fw, "std") or std.mem.eql(u8, fw, "zzz")))
-            {
-                std.log.info("skip {s}/{s} (endpoint not supported)", .{ fw, scenario.id });
-                continue;
-            }
-
             waitHealthy(io, fw, fig.port, scenario.path) catch |err| {
                 std.log.err("unhealthy before {s}/{s}: {s} - keeping {d} prior run(s)", .{
                     fw,

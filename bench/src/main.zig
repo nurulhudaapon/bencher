@@ -87,12 +87,6 @@ pub fn main(init: std.process.Init) !void {
         // Fresh container per scenario so a wedged server cannot poison later runs.
         const scenarios = [_][]const u8{ "plaintext", "json" };
         for (scenarios) |scenario| {
-            if (std.mem.eql(u8, scenario, "json") and
-                (std.mem.eql(u8, fw, "std") or std.mem.eql(u8, fw, "zzz")))
-            {
-                continue;
-            }
-
             {
                 var cmd: std.ArrayList([]const u8) = .empty;
                 try cmd.appendSlice(arena, &.{ "docker", "compose", "-f", compose_path, "up", "-d", "--wait", "--force-recreate", fw });
