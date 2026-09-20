@@ -106,44 +106,66 @@ jobs:
           retention-days: 1
 
   bench:
-    name: bench (${{ matrix.platform }})
+    name: bench (${{ matrix.framework }} / ${{ matrix.os.name }})
     needs: [build]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 240
+    runs-on: ${{ matrix.os.runner }}
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: ubuntu-latest
-            platform: linux-x86_64
-          - runner: ubuntu-24.04-arm
-            platform: linux-aarch64
+        framework: [httpz, zap, zzz, zinc, std]
+        os:
+          - name: linux-x86_64
+            runner: ubuntu-latest
+          - name: linux-aarch64
+            runner: ubuntu-24.04-arm
     defaults:
       run:
         shell: bash
     steps:
+      - name: Check if framework is selected
+        id: check
+        run: |
+          INPUT="${{ github.event.inputs.frameworks }}"
+          FW="${{ matrix.framework }}"
+          if [ -z "$INPUT" ] || echo "$INPUT" | grep -qw "$FW"; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
+        if: steps.check.outputs.skip == 'false'
         uses: actions/checkout@v4
 
       - name: Setup Zig
+        if: steps.check.outputs.skip == 'false'
         uses: mlugg/setup-zig@v2
         with:
           # Host orchestrator (bench/src) uses Zig 0.17 process.Init / Io APIs.
           version: 0.17.0-dev.2131+d08989840
 
-      - name: Download image artifacts
+      - name: Download framework image
+        if: steps.check.outputs.skip == 'false'
         uses: actions/download-artifact@v5
         with:
-          pattern: image-${{ matrix.platform }}-*
+          name: image-${{ matrix.os.name }}-${{ matrix.framework }}
           path: /tmp/images
-          merge-multiple: true
+
+      - name: Download bencher image
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/download-artifact@v5
+        with:
+          name: image-${{ matrix.os.name }}-bencher
+          path: /tmp/images
 
       - name: Load Docker images
+        if: steps.check.outputs.skip == 'false'
         run: |
           shopt -s nullglob
           files=(/tmp/images/*.tar.gz)
           if [ ${#files[@]} -eq 0 ]; then
-            echo "No image tarballs for ${{ matrix.platform }}"
+            echo "No image tarballs for ${{ matrix.framework }} / ${{ matrix.os.name }}"
             exit 1
           fi
           for f in "${files[@]}"; do
@@ -153,33 +175,31 @@ jobs:
           docker images 'zig_web_bench-*'
 
       - name: Docker info
+        if: steps.check.outputs.skip == 'false'
         run: |
           docker version
           uname -a
 
       - name: Run benchmarks
+        if: steps.check.outputs.skip == 'false'
         env:
-          BENCH_PLATFORM: ${{ matrix.platform }}
+          BENCH_PLATFORM: ${{ matrix.os.name }}
           BENCH_SKIP_BUILD: "1"
           DOCKER_BUILDKIT: "1"
         run: |
           cd bench
-          if [ -n "${{ github.event.inputs.frameworks }}" ]; then
-            zig build run -- ${{ github.event.inputs.frameworks }}
-          else
-            zig build run
-          fi
+          zig build run -- ${{ matrix.framework }}
 
-      - name: List platform partials
-        if: always()
-        run: ls -la app/.bench-*-${{ matrix.platform }}.tsv || true
+      - name: List framework partial
+        if: always() && steps.check.outputs.skip == 'false'
+        run: ls -la "app/.bench-${{ matrix.framework }}-${{ matrix.os.name }}.tsv" || true
 
-      - name: Upload platform partials
-        if: always()
+      - name: Upload framework partial
+        if: always() && steps.check.outputs.skip == 'false'
         uses: actions/upload-artifact@v5
         with:
-          name: bench-partials-${{ matrix.platform }}
-          path: app/.bench-*-${{ matrix.platform }}.tsv
+          name: bench-partials-${{ matrix.os.name }}-${{ matrix.framework }}
+          path: app/.bench-${{ matrix.framework }}-${{ matrix.os.name }}.tsv
           # Partials are dotfiles (.bench-*.tsv); excluded by default since v4.4.
           include-hidden-files: true
           if-no-files-found: error

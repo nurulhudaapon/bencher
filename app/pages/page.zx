@@ -213,11 +213,45 @@ fn scenarioHasRuns(runs: []const Run, id: []const u8) bool {
     return false;
 }
 
+fn platformHasRuns(runs: []const Run, id: []const u8) bool {
+    for (runs) |run| {
+        if (std.mem.eql(u8, run.platform, id)) return true;
+    }
+    return false;
+}
+
 fn buildRunnableScenarios(allocator: zx.Allocator, scenarios: []const Scenario, runs: []const Run) []const Scenario {
     var list: std.ArrayList(Scenario) = .empty;
     for (scenarios) |sc| {
         if (!scenarioHasRuns(runs, sc.id)) continue;
         list.append(allocator, sc) catch unreachable;
+    }
+    return list.toOwnedSlice(allocator) catch unreachable;
+}
+
+fn buildRunnablePlatforms(allocator: zx.Allocator, platforms: []const Platform, runs: []const Run) []const Platform {
+    var list: std.ArrayList(Platform) = .empty;
+    for (platforms) |pl| {
+        if (!platformHasRuns(runs, pl.id)) continue;
+        list.append(allocator, pl) catch unreachable;
+    }
+    return list.toOwnedSlice(allocator) catch unreachable;
+}
+
+fn buildSwitchOptions(
+    allocator: zx.Allocator,
+    catalog: []const SwitchOption,
+    platforms: []const Platform,
+    comptime field: []const u8,
+) []const SwitchOption {
+    var list: std.ArrayList(SwitchOption) = .empty;
+    for (catalog) |opt| {
+        for (platforms) |pl| {
+            if (std.mem.eql(u8, @field(pl, field), opt.id)) {
+                list.append(allocator, opt) catch unreachable;
+                break;
+            }
+        }
     }
     return list.toOwnedSlice(allocator) catch unreachable;
 }
@@ -566,17 +600,20 @@ pub fn Page(ctx: zx.PageContext) !zx.Component {
     const results = try fetchResults(ctx);
 
     const meta = results.meta;
-    const platforms = results.platforms;
     const framework_metas = buildFrameworkMetas(allocator, results.frameworks);
     const runnable_scenarios = buildRunnableScenarios(allocator, results.scenarios, results.runs);
-    if (platforms.len == 0 or runnable_scenarios.len == 0) return error.ResultsIncomplete;
+    const runnable_platforms = buildRunnablePlatforms(allocator, results.platforms, results.runs);
+    if (runnable_platforms.len == 0 or runnable_scenarios.len == 0) return error.ResultsIncomplete;
+
+    const available_os = buildSwitchOptions(allocator, &os_options, runnable_platforms, "os");
+    const available_arch = buildSwitchOptions(allocator, &arch_options, runnable_platforms, "arch");
 
     const initial_scenario = runnable_scenarios[0];
-    const default_platform = platforms[0].id;
-    const default_os = platforms[0].os;
-    const default_arch = platforms[0].arch;
+    const default_platform = runnable_platforms[0].id;
+    const default_os = runnable_platforms[0].os;
+    const default_arch = runnable_platforms[0].arch;
 
-    const panels = buildPanels(allocator, framework_metas, results.runs, runnable_scenarios, platforms, initial_scenario.id, default_platform);
+    const panels = buildPanels(allocator, framework_metas, results.runs, runnable_scenarios, runnable_platforms, initial_scenario.id, default_platform);
     const categories = buildCategories(allocator, results.comparison, framework_metas);
     const labels = buildLabels(allocator, meta, framework_metas.len);
 
@@ -638,7 +675,7 @@ pub fn Page(ctx: zx.PageContext) !zx.Component {
                                 <div class="plat-side plat-os">
                                     <span class="plat-current" data-os-current>{osLabel(default_os)}</span>
                                     <div class="plat-menu" role="group" aria-label="Operating system">
-                                        {for (os_options) |opt| (
+                                        {for (available_os) |opt| (
                                             <button
                                                 type="button"
                                                 class={if (std.mem.eql(u8, opt.id, default_os)) "plat-opt plat-opt-active" else "plat-opt"}
@@ -654,7 +691,7 @@ pub fn Page(ctx: zx.PageContext) !zx.Component {
                                 <div class="plat-side plat-arch">
                                     <span class="plat-current" data-arch-current>{archLabel(default_arch)}</span>
                                     <div class="plat-menu" role="group" aria-label="CPU architecture">
-                                        {for (arch_options) |opt| (
+                                        {for (available_arch) |opt| (
                                             <button
                                                 type="button"
                                                 class={if (std.mem.eql(u8, opt.id, default_arch)) "plat-opt plat-opt-active" else "plat-opt"}
