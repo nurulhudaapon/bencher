@@ -21,6 +21,7 @@ Results are written to `app/results.zon` (imported by the site).
 - [Zig Standard Library HTTP Server](https://github.com/ziglang/zig)
 - [Zap](https://github.com/zigzap/zap)
 - [HTTPz](https://github.com/karlseguin/http.zig)
+- [Dusty](https://github.com/lalinsky/dusty)
 - [zzz](https://github.com/tardy-org/zzz)
-- [Zinc](https://github.com/zon-dev/zinc/)
+- [Zinc](https://github.com/zon-dev/zinc/) (temporarily disabled)
 

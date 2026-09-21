@@ -206,6 +206,12 @@ fn discoverFrameworks(arena: std.mem.Allocator, io: Io, frameworks_dir: []const 
         const dockerfile = try std.fs.path.join(arena, &.{ frameworks_dir, entry.name, "Dockerfile" });
         if (!pathExists(io, dockerfile)) continue;
 
+        const disabled = try std.fs.path.join(arena, &.{ frameworks_dir, entry.name, "disabled" });
+        if (pathExists(io, disabled)) {
+            std.log.info("skip framework {s} (disabled)", .{entry.name});
+            continue;
+        }
+
         try list.append(arena, try arena.dupe(u8, entry.name));
     }
 

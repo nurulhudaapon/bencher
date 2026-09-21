@@ -1,0 +1,54 @@
+const std = @import("std");
+const shared_mod = @import("shared_mod");
+const http = @import("dusty");
+
+pub fn main(init: std.process.Init) !void {
+    var server = http.Server(void).init(init.gpa, init.io, .{
+        .max_connections = shared_mod.connection_count,
+        // Avoid timeout watchdogs doubling OS threads under std.Io.Threaded.
+        .timeout = .{
+            .request = null,
+            .keepalive = null,
+        },
+    }, {});
+    defer server.deinit();
+
+    server.router.get("/", root);
+    server.router.get("/httpz", plaintext);
+    server.router.get("/api/users", users);
+    server.router.get("/api/users/:id", user);
+
+    const addr: http.Address = .{
+        .ip = try std.Io.net.IpAddress.parse("0.0.0.0", shared_mod.port),
+    };
+    std.debug.print("Started on port {d}\n", .{shared_mod.port});
+    try server.listen(addr);
+}
+
+fn root(_: *http.Request, res: *http.Response) !void {
+    res.status = .ok;
+    res.body = shared_mod.response.hello_world;
+}
+
+fn plaintext(_: *http.Request, res: *http.Response) !void {
+    res.status = .ok;
+    res.body = "OK";
+}
+
+fn users(_: *http.Request, res: *http.Response) !void {
+    res.status = .ok;
+    try res.json(shared_mod.response.users, .{});
+}
+
+fn user(req: *http.Request, res: *http.Response) !void {
+    const id = std.fmt.parseInt(u32, req.params.get("id") orelse "0", 10) catch 0;
+
+    if (id == 0 or id > shared_mod.response.users.len) {
+        res.status = .bad_request;
+        try res.json(.{ .message = "Invalid ID" }, .{});
+        return;
+    }
+
+    res.status = .ok;
+    try res.json(shared_mod.response.users[id - 1], .{});
+}

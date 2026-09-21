@@ -36,7 +36,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [httpz, zap, zzz, zinc, std, bencher]
+        image: [httpz, zap, zzz, dusty, std, bencher]
         os:
           - name: linux-x86_64
             runner: ubuntu-latest
@@ -113,7 +113,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        framework: [httpz, zap, zzz, zinc, std]
+        framework: [httpz, zap, zzz, dusty, std]
         os:
           - name: linux-x86_64
             runner: ubuntu-latest

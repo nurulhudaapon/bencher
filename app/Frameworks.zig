@@ -21,6 +21,7 @@ pub const Feature = struct {
     description: []const u8 = "",
     zap: FeatureCell = .{},
     httpz: FeatureCell = .{},
+    dusty: FeatureCell = .{},
     zzz: FeatureCell = .{},
     zinc: FeatureCell = .{},
     std: FeatureCell = .{},

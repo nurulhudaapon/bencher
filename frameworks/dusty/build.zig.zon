@@ -1,0 +1,17 @@
+.{
+    .name = .bench_dusty,
+    .version = "0.1.0",
+    .fingerprint = 0xdfdb36af2001c223,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .dusty = .{
+            .url = "git+https://github.com/lalinsky/dusty#v0.3.0",
+            .hash = "dusty-0.3.0-Qdw7RuMmIADEfIvweBs3lT1-8DL2W0iR4V3PlYrkeiX2",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "main.zig",
+    },
+}
