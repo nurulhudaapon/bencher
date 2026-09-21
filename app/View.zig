@@ -10,6 +10,9 @@ pub const Run = Result.Run;
 pub const FeatureCell = Frameworks.FeatureCell;
 
 pub const FrameworkMeta = struct {
+    /// Folder / results id (e.g. `dusty-std`).
+    id: []const u8,
+    /// UI label (e.g. `dusty+std`).
     name: []const u8,
     version: []const u8,
     version_label: []const u8,
@@ -129,8 +132,10 @@ pub fn buildFrameworkMetas(allocator: std.mem.Allocator, frameworks: []const Fra
     const lang = languageLabel(allocator, frameworks);
     const metas = allocator.alloc(FrameworkMeta, frameworks.len) catch unreachable;
     for (frameworks, metas) |fw, *meta| {
+        const label = if (fw.label.len > 0) fw.label else fw.name;
         meta.* = .{
-            .name = fw.name,
+            .id = fw.name,
+            .name = label,
             .version = fw.version,
             .version_label = versionLabel(allocator, fw.version),
             .language_label = lang,
@@ -140,12 +145,13 @@ pub fn buildFrameworkMetas(allocator: std.mem.Allocator, frameworks: []const Fra
     return metas;
 }
 
-fn metaFor(metas: []const FrameworkMeta, name: []const u8) FrameworkMeta {
+fn metaFor(metas: []const FrameworkMeta, id: []const u8) FrameworkMeta {
     for (metas) |m| {
-        if (std.mem.eql(u8, m.name, name)) return m;
+        if (std.mem.eql(u8, m.id, id)) return m;
     }
     return .{
-        .name = name,
+        .id = id,
+        .name = id,
         .version = "0",
         .version_label = "v0",
         .language_label = if (metas.len > 0) metas[0].language_label else "Zig 0.16.0",
@@ -276,30 +282,59 @@ pub fn buildPanels(
 
 pub fn buildCategories(
     allocator: std.mem.Allocator,
-    comparison: []const Frameworks.Category,
-    metas: []const FrameworkMeta,
+    comparison_frameworks: []const Frameworks.Framework,
 ) []const Category {
-    const categories = allocator.alloc(Category, comparison.len) catch unreachable;
-    for (comparison, categories) |src, *category| {
-        const rows = allocator.alloc(FeatureRow, src.features.len) catch unreachable;
-        for (src.features, rows) |feature, *row| {
-            const cells = allocator.alloc(FeatureCell, metas.len) catch unreachable;
-            for (metas, cells) |fw, *cell| {
-                cell.* = Frameworks.cellFor(feature, fw.name);
+    // Merge category/feature rows across frameworks (first-seen order + descriptions).
+    var cat_order: std.ArrayList([]const u8) = .empty;
+    var cat_desc: std.StringHashMapUnmanaged([]const u8) = .empty;
+    var feat_order: std.StringHashMapUnmanaged(std.ArrayList([]const u8)) = .empty;
+    var feat_desc: std.StringHashMapUnmanaged([]const u8) = .empty;
+
+    for (comparison_frameworks) |fw| {
+        for (fw.comparison) |cat| {
+            if (!cat_desc.contains(cat.category)) {
+                cat_order.append(allocator, cat.category) catch unreachable;
+                cat_desc.put(allocator, cat.category, cat.description) catch unreachable;
+                feat_order.put(allocator, cat.category, .empty) catch unreachable;
             }
+            const feats = feat_order.getPtr(cat.category).?;
+            for (cat.features) |f| {
+                const key = featureKey(allocator, cat.category, f.name);
+                if (!feat_desc.contains(key)) {
+                    feats.append(allocator, f.name) catch unreachable;
+                    feat_desc.put(allocator, key, f.description) catch unreachable;
+                }
+            }
+        }
+    }
+
+    const categories = allocator.alloc(Category, cat_order.items.len) catch unreachable;
+    for (cat_order.items, categories) |cat_name, *category| {
+        const feat_names = feat_order.get(cat_name).?.items;
+        const rows = allocator.alloc(FeatureRow, feat_names.len) catch unreachable;
+        for (feat_names, rows) |feat_name, *row| {
+            const cells = allocator.alloc(FeatureCell, comparison_frameworks.len) catch unreachable;
+            for (comparison_frameworks, cells) |fw, *cell| {
+                cell.* = Frameworks.cellFor(fw, cat_name, feat_name);
+            }
+            const key = featureKey(allocator, cat_name, feat_name);
             row.* = .{
-                .name = feature.name,
-                .description = feature.description,
+                .name = feat_name,
+                .description = feat_desc.get(key) orelse "",
                 .cells = cells,
             };
         }
         category.* = .{
-            .name = src.category,
-            .description = src.description,
+            .name = cat_name,
+            .description = cat_desc.get(cat_name) orelse "",
             .features = rows,
         };
     }
     return categories;
+}
+
+fn featureKey(allocator: std.mem.Allocator, category: []const u8, feature: []const u8) []const u8 {
+    return std.fmt.allocPrint(allocator, "{s}\x00{s}", .{ category, feature }) catch unreachable;
 }
 
 pub fn buildLabels(allocator: std.mem.Allocator, meta: Result.Meta, fw_len: usize) Labels {

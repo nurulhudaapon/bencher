@@ -14,4 +14,78 @@
         "build.zig.zon",
         "main.zig",
     },
+    .meta = .{
+            .version = "0.3.0-beta.1",
+            .repo_url = "https://github.com/zon-dev/zinc",
+            .disabled = true,
+            .privileged = true,
+            .comparison = .{
+                .{
+                    .category = "Core Features",
+                    .description = "Essential characteristics and capabilities",
+                    .features = .{
+                        .{
+                            .name = "Language",
+                            .description = "Programming language and dependencies",
+                            .value = "Pure Zig",
+                            .status = "success",
+                        },
+                        .{
+                            .name = "External Dependencies",
+                            .description = "Third-party library requirements",
+                            .value = "aio (Zig)",
+                            .status = "success",
+                        },
+                        .{
+                            .name = "Concurrency Model",
+                            .description = "How concurrent requests are handled",
+                            .value = "Async I/O",
+                            .status = "success",
+                        },
+                        .{
+                            .name = "API Level",
+                            .description = "Abstraction level of the API",
+                            .value = "High-level",
+                            .status = "success",
+                        },
+                    },
+                },
+                .{
+                    .category = "Developer Experience",
+                    .description = "Ease of use and built-in features",
+                    .features = .{
+                        .{
+                            .name = "Built-in Router",
+                            .description = "URL routing and path parameters",
+                            .value = "Yes",
+                            .status = "success",
+                        },
+                        .{
+                            .name = "Path Parameters",
+                            .description = "Dynamic URL parameter extraction",
+                            .value = "Yes",
+                            .status = "success",
+                        },
+                        .{
+                            .name = "Query Parameters",
+                            .description = "URL query string parsing",
+                            .value = "Yes",
+                            .status = "success",
+                        },
+                        .{
+                            .name = "JSON Helpers",
+                            .description = "Built-in JSON serialization",
+                            .value = "Yes",
+                            .status = "success",
+                        },
+                        .{
+                            .name = "Response Helpers",
+                            .description = "Convenient response building",
+                            .value = "Yes",
+                            .status = "success",
+                        },
+                    },
+                },
+            },
+    },
 }

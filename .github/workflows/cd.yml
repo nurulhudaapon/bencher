@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "app/**"
+      - "frameworks/**"
       - "build.zig"
       - "build.zig.zon"
       - ".github/workflows/cd.yml"

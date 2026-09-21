@@ -11,7 +11,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const exe = b.addExecutable(.{
-        .name = "bench_dusty",
+        .name = "bench_dusty_zio",
         .root_module = b.createModule(.{
             .root_source_file = b.path("main.zig"),
             .target = target,
@@ -22,11 +22,20 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    const dusty = b.dependency("dusty", .{
+    const zio_dep = b.dependency("zio", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const dusty_dep = b.dependency("dusty", .{
         .target = target,
         .optimize = optimize,
         .use_tls = false,
     });
-    exe.root_module.addImport("dusty", dusty.module("dusty"));
+    // Prefer zio's AutoCancel timeouts over dusty's portable std.Io stub.
+    const dusty_mod = dusty_dep.module("dusty");
+    dusty_mod.addImport("zio", zio_dep.module("zio"));
+
+    exe.root_module.addImport("dusty", dusty_mod);
+    exe.root_module.addImport("zio", zio_dep.module("zio"));
     b.installArtifact(exe);
 }

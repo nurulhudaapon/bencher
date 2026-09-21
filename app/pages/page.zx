@@ -12,10 +12,12 @@ fn fetchResults(ctx: zx.PageContext) !Result {
 pub fn Page(ctx: zx.PageContext) !zx.Component {
     const allocator = ctx.arena;
     const results = try fetchResults(ctx);
-    const catalog = try Frameworks.load(allocator);
+    const catalog = try Frameworks.load(allocator, ctx.io);
 
     const meta = results.meta;
     const framework_metas = View.buildFrameworkMetas(allocator, catalog.frameworks);
+    const comparison_fws = try catalog.comparisonFrameworks(allocator);
+    const comparison_metas = View.buildFrameworkMetas(allocator, comparison_fws);
     const runnable_scenarios = View.buildRunnableScenarios(allocator, results.scenarios, results.runs);
     const runnable_platforms = View.buildRunnablePlatforms(allocator, results.platforms, results.runs);
     if (runnable_platforms.len == 0 or runnable_scenarios.len == 0) return error.ResultsIncomplete;
@@ -29,8 +31,8 @@ pub fn Page(ctx: zx.PageContext) !zx.Component {
     const default_arch = runnable_platforms[0].arch;
 
     const panels = View.buildPanels(allocator, framework_metas, results.runs, runnable_scenarios, runnable_platforms, initial_scenario.id, default_platform);
-    const categories = View.buildCategories(allocator, catalog.comparison, framework_metas);
-    const labels = View.buildLabels(allocator, meta, framework_metas.len);
+    const categories = View.buildCategories(allocator, comparison_fws);
+    const labels = View.buildLabels(allocator, meta, comparison_metas.len);
 
     return (
         <div
@@ -68,7 +70,7 @@ pub fn Page(ctx: zx.PageContext) !zx.Component {
             </div>
 
             <ComparisonTable
-                frameworks={framework_metas}
+                frameworks={comparison_metas}
                 categories={categories}
                 colspan={labels.colspan}
             />

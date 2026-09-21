@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       frameworks:
-        description: "Frameworks to benchmark (space-separated, default: all)"
+        description: "Frameworks to benchmark (space-separated, default: all enabled)"
         required: false
         default: ""
 
@@ -29,14 +29,55 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  discover:
+    name: discover frameworks
+    runs-on: ubuntu-latest
+    outputs:
+      frameworks: ${{ steps.set.outputs.frameworks }}
+      images: ${{ steps.set.outputs.images }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Discover frameworks/*/Dockerfile (respect build.zig.zon .meta.disabled)
+        id: set
+        run: |
+          python3 <<'PY' >> "$GITHUB_OUTPUT"
+          import json, pathlib, re
+
+          def disabled(zon: pathlib.Path) -> bool:
+              if not zon.is_file():
+                  return False
+              text = zon.read_text(encoding="utf-8")
+              meta = text.split(".meta", 1)
+              if len(meta) < 2:
+                  return False
+              return bool(re.search(r"\.disabled\s*=\s*true\b", meta[1]))
+
+          fws = []
+          for dockerfile in sorted(pathlib.Path("frameworks").glob("*/Dockerfile")):
+              fw = dockerfile.parent.name
+              if fw == "shared":
+                  continue
+              if disabled(dockerfile.parent / "build.zig.zon"):
+                  print(f"skip {fw} (disabled)", flush=True)
+                  continue
+              fws.append(fw)
+
+          images = fws + ["bencher"]
+          print(f"frameworks={json.dumps(fws)}")
+          print(f"images={json.dumps(images)}")
+          PY
+
   build:
     name: build (${{ matrix.os.name }} / ${{ matrix.image }})
+    needs: [discover]
     runs-on: ${{ matrix.os.runner }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        image: [httpz, zap, zzz, dusty, std, bencher]
+        image: ${{ fromJson(needs.discover.outputs.images) }}
         os:
           - name: linux-x86_64
             runner: ubuntu-latest
@@ -107,13 +148,13 @@ jobs:
 
   bench:
     name: bench (${{ matrix.framework }} / ${{ matrix.os.name }})
-    needs: [build]
+    needs: [discover, build]
     runs-on: ${{ matrix.os.runner }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        framework: [httpz, zap, zzz, dusty, std]
+        framework: ${{ fromJson(needs.discover.outputs.frameworks) }}
         os:
           - name: linux-x86_64
             runner: ubuntu-latest

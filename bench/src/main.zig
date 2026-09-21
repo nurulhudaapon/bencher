@@ -206,9 +206,8 @@ fn discoverFrameworks(arena: std.mem.Allocator, io: Io, frameworks_dir: []const 
         const dockerfile = try std.fs.path.join(arena, &.{ frameworks_dir, entry.name, "Dockerfile" });
         if (!pathExists(io, dockerfile)) continue;
 
-        const disabled = try std.fs.path.join(arena, &.{ frameworks_dir, entry.name, "disabled" });
-        if (pathExists(io, disabled)) {
-            std.log.info("skip framework {s} (disabled)", .{entry.name});
+        if (try isFrameworkDisabled(arena, io, frameworks_dir, entry.name)) {
+            std.log.info("skip framework {s} (disabled in build.zig.zon .meta)", .{entry.name});
             continue;
         }
 
@@ -222,6 +221,36 @@ fn discoverFrameworks(arena: std.mem.Allocator, io: Io, frameworks_dir: []const 
     }.less);
 
     return try list.toOwnedSlice(arena);
+}
+
+fn isFrameworkDisabled(arena: std.mem.Allocator, io: Io, frameworks_dir: []const u8, name: []const u8) !bool {
+    return metaFlag(arena, io, frameworks_dir, name, "disabled");
+}
+
+fn isFrameworkPrivileged(arena: std.mem.Allocator, io: Io, frameworks_dir: []const u8, name: []const u8) !bool {
+    const marker = try std.fs.path.join(arena, &.{ frameworks_dir, name, "privileged" });
+    if (pathExists(io, marker)) return true;
+    return metaFlag(arena, io, frameworks_dir, name, "privileged");
+}
+
+fn metaFlag(arena: std.mem.Allocator, io: Io, frameworks_dir: []const u8, name: []const u8, flag: []const u8) !bool {
+    const zon_path = try std.fs.path.join(arena, &.{ frameworks_dir, name, "build.zig.zon" });
+    const file = Io.Dir.cwd().openFile(io, zon_path, .{}) catch return false;
+    defer file.close(io);
+
+    var buf: [8192]u8 = undefined;
+    var reader = file.reader(io, &buf);
+    var aw: std.Io.Writer.Allocating = .init(arena);
+    _ = reader.interface.streamRemaining(&aw.writer) catch return false;
+    const raw = aw.written();
+
+    // Match `.meta = .{ ... .flag = true ... }` without a full ZON parse.
+    const meta_start = std.mem.indexOf(u8, raw, ".meta") orelse return false;
+    const meta = raw[meta_start..];
+    const needle_spaced = try std.fmt.allocPrint(arena, ".{s} = true", .{flag});
+    const needle_tight = try std.fmt.allocPrint(arena, ".{s}=true", .{flag});
+    return std.mem.indexOf(u8, meta, needle_spaced) != null or
+        std.mem.indexOf(u8, meta, needle_tight) != null;
 }
 
 fn filterRequested(
@@ -283,8 +312,7 @@ fn writeCompose(
     );
 
     for (frameworks) |fw| {
-        const privileged_path = try std.fs.path.join(arena, &.{ frameworks_dir, fw, "privileged" });
-        const privileged = pathExists(io, privileged_path);
+        const privileged = try isFrameworkPrivileged(arena, io, frameworks_dir, fw);
 
         try w.print(
             \\  {s}:

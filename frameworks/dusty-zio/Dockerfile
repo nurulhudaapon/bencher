@@ -13,16 +13,16 @@ RUN ARCH="$(uname -m)" \
 
 WORKDIR /app
 COPY frameworks/shared frameworks/shared
-COPY frameworks/dusty frameworks/dusty
+COPY frameworks/dusty-zio frameworks/dusty-zio
 
-WORKDIR /app/frameworks/dusty
+WORKDIR /app/frameworks/dusty-zio
 RUN zig build -Doptimize=ReleaseFast -Dcpu=baseline \
-    && test -x zig-out/bin/bench_dusty
+    && test -x zig-out/bin/bench_dusty_zio
 
 FROM debian:12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=build /app/frameworks/dusty/zig-out/bin/bench_dusty /bin/framework
+COPY --from=build /app/frameworks/dusty-zio/zig-out/bin/bench_dusty_zio /bin/framework
 EXPOSE 8081
 HEALTHCHECK --interval=1s --timeout=2s --retries=30 --start-period=2s \
     CMD curl -fsS "http://127.0.0.1:8081/httpz" >/dev/null || exit 1

@@ -4,7 +4,7 @@ pub fn Layout(ctx: zx.LayoutContext, children: zx.Component) zx.Component {
             <head>
                 <meta charset="utf-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
-                <meta name="description" content="Performance comparison of popular Zig Web Servers including httpz, dusty, zap, zzz, and std.http." />
+                <meta name="description" content="Performance comparison of popular Zig Web Servers including httpz, dusty+std, dusty+zio, zap, zzz, and std.http." />
                 <meta name="keywords" content="zig, web frameworks, benchmark, performance, httpz, dusty, zap, std, zzz" />
                 <meta name="author" content="Nurul Huda (Apon)" />
                 <title>Zig Web Servers Benchmark</title>
