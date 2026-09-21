@@ -43,7 +43,7 @@ jobs:
         id: set
         run: |
           python3 <<'PY' >> "$GITHUB_OUTPUT"
-          import json, pathlib, re
+          import json, pathlib, re, sys
 
           def disabled(zon: pathlib.Path) -> bool:
               if not zon.is_file():
@@ -60,7 +60,8 @@ jobs:
               if fw == "shared":
                   continue
               if disabled(dockerfile.parent / "build.zig.zon"):
-                  print(f"skip {fw} (disabled)", flush=True)
+                  # stdout is GITHUB_OUTPUT; logs must not land there.
+                  print(f"skip {fw} (disabled)", file=sys.stderr, flush=True)
                   continue
               fws.append(fw)
 
