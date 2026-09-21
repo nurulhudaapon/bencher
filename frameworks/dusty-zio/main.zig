@@ -11,6 +11,10 @@ pub fn main(init: std.process.Init) !void {
 
     var server = http.Server(void).init(init.gpa, rt.io(), .{
         .max_connections = shared_mod.connection_count,
+        .listen = .{
+            .reuse_address = true,
+            .kernel_backlog = shared_mod.connection_count,
+        },
         .timeout = .{
             .request = null,
             .keepalive = null,

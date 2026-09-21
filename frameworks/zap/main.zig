@@ -10,6 +10,7 @@ pub fn main() !void {
     var listener = zap.HttpListener.init(.{
         .port = shared_mod.port,
         .on_request = dispatchRequest,
+        .max_clients = shared_mod.connection_count,
         .log = false,
     });
     try listener.listen();

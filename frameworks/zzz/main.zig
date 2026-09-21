@@ -38,7 +38,7 @@ pub fn main(init: std.process.Init) !void {
     });
     defer socket.close_blocking();
     try socket.bind();
-    try socket.listen(4096);
+    try socket.listen(shared_mod.connection_count);
 
     const EntryParams = struct {
         router: *const Router,
@@ -53,7 +53,7 @@ pub fn main(init: std.process.Init) !void {
                     .stack_size = 1024 * 1024 * 4,
                     .socket_buffer_bytes = 1024 * 2,
                     .keepalive_count_max = null,
-                    .connection_count_max = shared_mod.connection_count,
+                    .connection_count_max = shared_mod.connection_count / shared_mod.thread_count,
                 });
                 try server.serve(rt, p.router, .{ .normal = p.socket });
             }

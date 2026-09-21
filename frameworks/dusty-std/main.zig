@@ -3,9 +3,18 @@ const shared_mod = @import("shared_mod");
 const http = @import("dusty");
 
 pub fn main(init: std.process.Init) !void {
-    var server = http.Server(void).init(init.gpa, init.io, .{
+    var threaded: std.Io.Threaded = .init(init.gpa, .{
+        .async_limit = .limited(shared_mod.thread_count -| 1),
+        .concurrent_limit = .limited(shared_mod.connection_count),
+    });
+    defer threaded.deinit();
+
+    var server = http.Server(void).init(init.gpa, threaded.io(), .{
         .max_connections = shared_mod.connection_count,
-        // Avoid timeout watchdogs doubling OS threads under std.Io.Threaded.
+        .listen = .{
+            .reuse_address = true,
+            .kernel_backlog = shared_mod.connection_count,
+        },
         .timeout = .{
             .request = null,
             .keepalive = null,

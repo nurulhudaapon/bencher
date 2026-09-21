@@ -3,8 +3,7 @@
     .connections = 32,
     .threads = 1,
     .duration_s = 8,
-    // Keep modest for OrbStack/io_uring stability (higher rates → SIGBUS/SIGTRAP).
-    .rate = 50000,
+    .rate = 1000000,
     .port = 8081,
     .timeout_s = 2,
     .frameworks = .{ "zap", "httpz", "zzz", "dusty-std", "dusty-zio", "std" },

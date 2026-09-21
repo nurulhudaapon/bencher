@@ -6,14 +6,15 @@ const http = std.http;
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const address = try net.IpAddress.parse("0.0.0.0", shared_mod.port);
-    var server = try address.listen(io, .{ .reuse_address = true });
+    var server = try address.listen(io, .{
+        .reuse_address = true,
+        .kernel_backlog = shared_mod.connection_count,
+    });
     defer server.deinit(io);
 
-    std.debug.print("Started on port {d} ({d} threads)\n", .{ shared_mod.port, shared_mod.thread_count });
+    std.debug.print("Started on port {d} ({d} threads)\n", .{ shared_mod.port, shared_mod.blocking_threads });
 
-    // Fixed worker set (same limit as httpz/zap/zzz via shared_mod.thread_count).
-    // Each worker accepts then handles one connection at a time.
-    var workers: [shared_mod.thread_count - 1]std.Thread = undefined;
+    var workers: [shared_mod.blocking_threads - 1]std.Thread = undefined;
     for (&workers) |*t| {
         t.* = try std.Thread.spawn(.{}, acceptLoop, .{ io, &server });
     }

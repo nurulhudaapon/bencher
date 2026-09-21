@@ -7,15 +7,12 @@ pub fn main() !void {
         .addr = "0.0.0.0",
         .port = shared_mod.port,
         .num_threads = shared_mod.thread_count,
-        // Cap below shared_mod.connection_count: aio/io_uring under OrbStack wedges
-        // after large keep-alive storms (CLOSE_WAIT pileup + stuck CQ wait).
-        .max_conn = 512,
+        .max_conn = shared_mod.connection_count,
         .read_buffer_len = 8192,
         .header_buffer_len = 1024,
         .body_buffer_len = 4096,
         .stack_size = 1024 * 1024,
-        // io_uring entries must be a power of 2; keep modest for Docker stability.
-        .aio_queue_depth = 512,
+        .aio_queue_depth = shared_mod.connection_count,
     });
     defer z.deinit();
 
