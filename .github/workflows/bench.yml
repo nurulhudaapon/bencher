@@ -39,7 +39,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Discover frameworks/*/Dockerfile (respect build.zig.zon .meta.disabled)
+      - name: Discover frameworks (respect build.zig.zon .meta.disabled)
         id: set
         run: |
           python3 <<'PY' >> "$GITHUB_OUTPUT"
@@ -55,11 +55,11 @@ jobs:
               return bool(re.search(r"\.disabled\s*=\s*true\b", meta[1]))
 
           fws = []
-          for dockerfile in sorted(pathlib.Path("frameworks").glob("*/Dockerfile")):
-              fw = dockerfile.parent.name
+          for zon in sorted(pathlib.Path("frameworks").glob("*/build.zig.zon")):
+              fw = zon.parent.name
               if fw == "shared":
                   continue
-              if disabled(dockerfile.parent / "build.zig.zon"):
+              if disabled(zon):
                   # stdout is GITHUB_OUTPUT; logs must not land there.
                   print(f"skip {fw} (disabled)", file=sys.stderr, flush=True)
                   continue
@@ -104,16 +104,22 @@ jobs:
         if: steps.check.outputs.skip == 'false'
         uses: actions/checkout@v4
 
-      - name: Resolve Dockerfile / tag
+      - name: Resolve Dockerfile / tag / build-args
         if: steps.check.outputs.skip == 'false'
         id: meta
         run: |
-          if [ "${{ matrix.image }}" = "bencher" ]; then
+          IMG="${{ matrix.image }}"
+          echo "tag=zig_web_bench-$IMG" >> "$GITHUB_OUTPUT"
+          if [ "$IMG" = "bencher" ]; then
             echo "file=bench/docker/Dockerfile" >> "$GITHUB_OUTPUT"
-            echo "tag=zig_web_bench-bencher" >> "$GITHUB_OUTPUT"
+            echo "build_args=" >> "$GITHUB_OUTPUT"
+          elif [ "$IMG" = "zinc" ]; then
+            echo "file=frameworks/zinc/Dockerfile" >> "$GITHUB_OUTPUT"
+            echo "build_args=" >> "$GITHUB_OUTPUT"
           else
-            echo "file=frameworks/${{ matrix.image }}/Dockerfile" >> "$GITHUB_OUTPUT"
-            echo "tag=zig_web_bench-${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+            BINARY="bench_$(echo "$IMG" | tr '-' '_')"
+            echo "file=frameworks/Dockerfile" >> "$GITHUB_OUTPUT"
+            echo "build_args=FRAMEWORK=$IMG,BINARY=$BINARY" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Set up Docker Buildx
@@ -130,6 +136,7 @@ jobs:
         with:
           context: .
           file: ${{ steps.meta.outputs.file }}
+          build-args: ${{ steps.meta.outputs.build_args }}
           load: true
           tags: ${{ steps.meta.outputs.tag }}:latest
           cache-from: type=gha,scope=${{ matrix.os.name }}-${{ matrix.image }}
@@ -180,13 +187,6 @@ jobs:
         if: steps.check.outputs.skip == 'false'
         uses: actions/checkout@v4
 
-      - name: Setup Zig
-        if: steps.check.outputs.skip == 'false'
-        uses: mlugg/setup-zig@v2
-        with:
-          # Host orchestrator (bench/src) uses Zig 0.17 process.Init / Io APIs.
-          version: 0.17.0-dev.2131+d08989840
-
       - name: Download framework image
         if: steps.check.outputs.skip == 'false'
         uses: actions/download-artifact@v5
@@ -228,9 +228,7 @@ jobs:
           BENCH_PLATFORM: ${{ matrix.os.name }}
           BENCH_SKIP_BUILD: "1"
           DOCKER_BUILDKIT: "1"
-        run: |
-          cd bench
-          zig build run -- ${{ matrix.framework }}
+        run: bash bench/run.sh ${{ matrix.framework }}
 
       - name: List framework partial
         if: always() && steps.check.outputs.skip == 'false'

@@ -5,7 +5,6 @@ zig-pkg/
 static
 bench/.zig-cache/
 bench/zig-out/
-bench/compose.generated.yml
 bench/runner/.zig-cache/
 bench/runner/zig-out/
 bench/runner/zig-pkg/

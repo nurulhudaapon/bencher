@@ -1,20 +1,16 @@
 ARG CACHE_BUST=9
 ARG ZIG_VER=0.17.0-dev.2131+d08989840
 
-FROM debian:12-slim AS build
+FROM alpine:3.22 AS build
 ARG ZIG_VER
 ARG CACHE_BUST
-RUN apt-get update && apt-get install -y --no-install-recommends curl xz-utils ca-certificates patch \
-    && rm -rf /var/lib/apt/lists/* \
+RUN apk add --no-cache curl xz patch \
     && echo "cache_bust=${CACHE_BUST}"
 # 0.17.0-dev builds live under /builds/; stable releases under /download/.
-RUN ARCH="$(uname -m)" \
-    && ZIG_URL="https://ziglang.org/builds/zig-${ARCH}-linux-${ZIG_VER}.tar.xz" \
-    && curl -fsSL "$ZIG_URL" -o /tmp/zig.tar.xz \
-    && tar -xJf /tmp/zig.tar.xz -C /opt \
-    && mv /opt/zig-${ARCH}-linux-${ZIG_VER} /opt/zig \
-    && ln -s /opt/zig/zig /usr/local/bin/zig \
-    && rm /tmp/zig.tar.xz
+RUN curl -fsSL "https://ziglang.org/builds/zig-$(uname -m)-linux-${ZIG_VER}.tar.xz" \
+        | tar -xJ -C /opt \
+    && mv /opt/zig-$(uname -m)-linux-${ZIG_VER} /opt/zig \
+    && ln -s /opt/zig/zig /usr/local/bin/zig
 
 WORKDIR /app
 COPY frameworks/shared frameworks/shared
@@ -61,14 +57,10 @@ RUN set -eux; \
     if [ -f patches/zinc-zig017-compat.patch ]; then patch -p1 -d deps/zinc < patches/zinc-zig017-compat.patch; fi; \
     if [ -f patches/zinc-close-after-write.patch ]; then patch -p1 -d deps/zinc < patches/zinc-close-after-write.patch; fi
 
-RUN zig build -Doptimize=ReleaseFast -Dcpu=baseline \
+RUN zig build -Doptimize=ReleaseFast -Dcpu=baseline -Dtarget=$(uname -m)-linux-musl \
     && test -x zig-out/bin/bench_zinc
 
-FROM debian:12-slim
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/*
+FROM alpine:3.22
 COPY --from=build /app/frameworks/zinc/zig-out/bin/bench_zinc /bin/framework
 EXPOSE 8081
-HEALTHCHECK --interval=1s --timeout=2s --retries=30 --start-period=2s \
-    CMD curl -fsS "http://127.0.0.1:8081/httpz" >/dev/null || exit 1
 ENTRYPOINT ["/bin/framework"]

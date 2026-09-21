@@ -1,27 +1,20 @@
-### Zig Web Framework Benchmark
+### Zig Web Server Libraries Benchmark
 
-This is a benchmark suite for Zig web server libraries.
+Benchmarks Zig web server libraries for performance.
 
-### Prerequisites
-
-- Docker (for Docker mode)
-- Zig compiler (0.17+ for the site / host orchestrator)
-
-### Running the benchmarks
+### Run
 
 ```bash
-zig build run -- httpz zap          # frameworks only
-BENCH_PLATFORM=linux-x86_64 zig build run
+bash bench/run.sh              # all frameworks
+bash bench/run.sh httpz zap    # specific frameworks
 ```
 
-Results are written to `app/results.zon` (imported by the site).
+Results will be written to `app/results.zon`.
 
-### Server Libraries
+### Adding new benchmarks
 
-- [Zig Standard Library HTTP Server](https://github.com/ziglang/zig)
-- [Zap](https://github.com/zigzap/zap)
-- [HTTPz](https://github.com/karlseguin/http.zig)
-- [Dusty](https://github.com/lalinsky/dusty)
-- [zzz](https://github.com/tardy-org/zzz)
-- [Zinc](https://github.com/zon-dev/zinc/) (temporarily disabled)
-
+1. Create `frameworks/<name>/` that has endpoints similar to an existing one like.
+2. Put catalog metadata in `build.zig.zon` under `.meta` following existing examples.  
+3. Add `<name>` to `.frameworks` in `bench/runner/src/benchfig.zon`.
+4. Regenerate compose and commit it: `bash bench/run.sh --write-compose`
+5. Smoke-test: `bash bench/run.sh <name>`

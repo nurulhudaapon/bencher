@@ -1,12 +1,8 @@
 //! Host-side Docker bench orchestrator.
 //!
-//! Layout:
-//!   bench/src/          this orchestrator (compose + docker run loop)
-//!   bench/runner/       in-container load generator (binary still named `bencher`)
-//!   bench/docker/       Dockerfile for the load-generator image
+//! Prefer `bash bench/run.sh` (no host Zig). This Zig entrypoint mirrors the same
+//! flow against committed `bench/compose.yml` (regenerate with `--write-compose`).
 //!
-//! Discovers frameworks/*/Dockerfile and writes bench/compose.generated.yml.
-//! Usage: zig build run -- [zap httpz ...]   (default: all discovered)
 //!
 //! Speed knobs (env):
 //!   BENCH_SKIP_BUILD=1     never rebuild images
@@ -28,7 +24,7 @@ pub fn main(init: std.process.Init) !void {
     const frameworks_dir = try std.fs.path.join(arena, &.{ root, "frameworks" });
     const bench_dir = try std.fs.path.join(arena, &.{ root, "bench" });
     const out_zon = try std.fs.path.join(arena, &.{ root, "app", "results.zon" });
-    const compose_path = try std.fs.path.join(arena, &.{ bench_dir, "compose.generated.yml" });
+    const compose_path = try std.fs.path.join(arena, &.{ bench_dir, "compose.yml" });
 
     const discovered = try discoverFrameworks(arena, io, frameworks_dir);
     const frameworks: []const []const u8 = if (args.len > 1)
@@ -38,9 +34,8 @@ pub fn main(init: std.process.Init) !void {
 
     if (frameworks.len == 0) return error.NoFrameworks;
 
-    // Always register every discovered framework in compose so leftover
-    // containers from prior runs can be stopped (cpuset isolation).
-    try writeCompose(arena, io, compose_path, discovered, frameworks_dir);
+    // Use committed compose.yml (regenerate via `bash bench/run.sh --write-compose`).
+    if (!pathExists(io, compose_path)) return error.ComposeMissing;
 
     const csv = try joinCsv(arena, frameworks);
     std.log.info("frameworks: {s}", .{csv});
@@ -98,10 +93,10 @@ pub fn main(init: std.process.Init) !void {
             const env_fw = try std.fmt.allocPrint(arena, "BENCH_FRAMEWORKS={s}", .{fw});
             var cmd: std.ArrayList([]const u8) = .empty;
             try cmd.appendSlice(arena, &.{
-                "docker",         "compose",
-                "-f",             compose_path,
-                "run",            "--rm",
-                "--no-deps",      "-e",
+                "docker",    "compose",
+                "-f",        compose_path,
+                "run",       "--rm",
+                "--no-deps", "-e",
                 env_fw,
             });
             if (init.environ_map.get("BENCH_PLATFORM")) |plat| {
@@ -109,8 +104,8 @@ pub fn main(init: std.process.Init) !void {
                 try cmd.appendSlice(arena, &.{ "-e", env_pl });
             }
             try cmd.appendSlice(arena, &.{
-                "-v",             volume,
-                "bencher",        "/out/results.zon",
+                "-v",      volume,
+                "bencher", "/out/results.zon",
             });
             // OrbStack + zio/io_uring occasionally SIGBUS/SIGTRAP under load.
             var attempt: u32 = 0;
@@ -143,12 +138,12 @@ pub fn main(init: std.process.Init) !void {
     {
         var cmd: std.ArrayList([]const u8) = .empty;
         try cmd.appendSlice(arena, &.{
-            "docker",         "compose",
-            "-f",             compose_path,
-            "run",            "--rm",
-            "--no-deps",      "-v",
-            volume,           "bencher",
-            "--merge",        "/out/results.zon",
+            "docker",    "compose",
+            "-f",        compose_path,
+            "run",       "--rm",
+            "--no-deps", "-v",
+            volume,      "bencher",
+            "--merge",   "/out/results.zon",
         });
         try runInDir(gpa, io, bench_dir, cmd.items);
     }
@@ -204,7 +199,11 @@ fn discoverFrameworks(arena: std.mem.Allocator, io: Io, frameworks_dir: []const 
         if (std.mem.eql(u8, entry.name, "shared")) continue;
 
         const dockerfile = try std.fs.path.join(arena, &.{ frameworks_dir, entry.name, "Dockerfile" });
-        if (!pathExists(io, dockerfile)) continue;
+        const shared_dockerfile = try std.fs.path.join(arena, &.{ frameworks_dir, "Dockerfile" });
+        const zon = try std.fs.path.join(arena, &.{ frameworks_dir, entry.name, "build.zig.zon" });
+        // Accept either a per-framework Dockerfile or the shared frameworks/Dockerfile + build.zig.zon.
+        if (!pathExists(io, zon)) continue;
+        if (!pathExists(io, dockerfile) and !pathExists(io, shared_dockerfile)) continue;
 
         if (try isFrameworkDisabled(arena, io, frameworks_dir, entry.name)) {
             std.log.info("skip framework {s} (disabled in build.zig.zon .meta)", .{entry.name});
@@ -301,11 +300,11 @@ fn writeCompose(
         \\    - bench-net
         \\
         \\x-healthcheck: &healthcheck
-        \\  test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/httpz"]
-        \\  interval: 500ms
+        \\  test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8081/httpz"]
+        \\  interval: 1s
         \\  timeout: 2s
-        \\  retries: 40
-        \\  start_period: 0s
+        \\  retries: 15
+        \\  start_period: 5s
         \\
         \\services:
         \\
@@ -313,6 +312,8 @@ fn writeCompose(
 
     for (frameworks) |fw| {
         const privileged = try isFrameworkPrivileged(arena, io, frameworks_dir, fw);
+        const per_fw_dockerfile = try std.fs.path.join(arena, &.{ frameworks_dir, fw, "Dockerfile" });
+        const has_own_dockerfile = pathExists(io, per_fw_dockerfile);
 
         try w.print(
             \\  {s}:
@@ -320,9 +321,29 @@ fn writeCompose(
             \\    image: zig_web_bench-{s}
             \\    build:
             \\      context: ..
-            \\      dockerfile: frameworks/{s}/Dockerfile
             \\
-        , .{ fw, fw, fw });
+        , .{ fw, fw });
+        if (has_own_dockerfile) {
+            try w.print("      dockerfile: frameworks/{s}/Dockerfile\n", .{fw});
+        } else {
+            // Shared frameworks/Dockerfile — binary name is bench_<fw with - → _>.
+            var binary_buf: [128]u8 = undefined;
+            const prefix = "bench_";
+            @memcpy(binary_buf[0..prefix.len], prefix);
+            var binary_len: usize = prefix.len;
+            for (fw) |c| {
+                binary_buf[binary_len] = if (c == '-') '_' else c;
+                binary_len += 1;
+            }
+            const binary = binary_buf[0..binary_len];
+            try w.print(
+                \\      dockerfile: frameworks/Dockerfile
+                \\      args:
+                \\        FRAMEWORK: {s}
+                \\        BINARY: {s}
+                \\
+            , .{ fw, binary });
+        }
         if (privileged) try w.writeAll("    privileged: true\n");
         try w.writeAll("    healthcheck: *healthcheck\n\n");
     }

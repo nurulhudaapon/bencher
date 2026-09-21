@@ -1,0 +1,114 @@
+# Regenerate with: bash bench/run.sh --write-compose
+name: zig_web_bench
+
+x-framework: &framework
+  deploy:
+    resources:
+      limits:
+        cpus: "2"
+        memory: 2G
+  networks:
+    - bench-net
+
+x-healthcheck: &healthcheck
+  test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8081/httpz"]
+  interval: 1s
+  timeout: 2s
+  retries: 15
+  start_period: 5s
+
+services:
+  dusty-std:
+    <<: *framework
+    image: zig_web_bench-dusty-std
+    build:
+      context: ..
+      dockerfile: frameworks/Dockerfile
+      args:
+        FRAMEWORK: dusty-std
+        BINARY: bench_dusty_std
+    healthcheck: *healthcheck
+
+  dusty-zio:
+    <<: *framework
+    image: zig_web_bench-dusty-zio
+    build:
+      context: ..
+      dockerfile: frameworks/Dockerfile
+      args:
+        FRAMEWORK: dusty-zio
+        BINARY: bench_dusty_zio
+    privileged: true
+    healthcheck: *healthcheck
+
+  httpz:
+    <<: *framework
+    image: zig_web_bench-httpz
+    build:
+      context: ..
+      dockerfile: frameworks/Dockerfile
+      args:
+        FRAMEWORK: httpz
+        BINARY: bench_httpz
+    healthcheck: *healthcheck
+
+  std:
+    <<: *framework
+    image: zig_web_bench-std
+    build:
+      context: ..
+      dockerfile: frameworks/Dockerfile
+      args:
+        FRAMEWORK: std
+        BINARY: bench_std
+    healthcheck: *healthcheck
+
+  zap:
+    <<: *framework
+    image: zig_web_bench-zap
+    build:
+      context: ..
+      dockerfile: frameworks/Dockerfile
+      args:
+        FRAMEWORK: zap
+        BINARY: bench_zap
+    healthcheck: *healthcheck
+
+  zzz:
+    <<: *framework
+    image: zig_web_bench-zzz
+    build:
+      context: ..
+      dockerfile: frameworks/Dockerfile
+      args:
+        FRAMEWORK: zzz
+        BINARY: bench_zzz
+    privileged: true
+    healthcheck: *healthcheck
+
+  bencher:
+    image: zig_web_bench-bencher
+    build:
+      context: ..
+      dockerfile: bench/docker/Dockerfile
+      args:
+        ZIG_VER: "0.16.0"
+    # zio/zrk needs io_uring (Docker Desktop / OrbStack)
+    privileged: true
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+    environment:
+      BENCH_FRAMEWORKS: ${BENCH_FRAMEWORKS:-}
+      BENCH_SCENARIOS: ${BENCH_SCENARIOS:-}
+      BENCH_PLATFORM: ${BENCH_PLATFORM:-}
+    volumes:
+      - ../app:/out
+    networks:
+      - bench-net
+
+networks:
+  bench-net:
+    driver: bridge

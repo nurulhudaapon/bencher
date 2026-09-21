@@ -25,19 +25,8 @@ pub fn build(b: *std.Build) !void {
         },
     });
 
-    // Docker framework benchmarks: `zig build run -- [zap httpz ...]`
-    const bench_exe = b.addExecutable(.{
-        .name = "bench",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("bench/src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    b.installArtifact(bench_exe);
-
-    const run_step = b.step("run", "Run Docker framework benchmarks (zrk → app/results.zon)");
-    const run_cmd = b.addRunArtifact(bench_exe);
+    const run_step = b.step("run", "Run Docker framework benchmarks (bench/run.sh → app/results.zon)");
+    const run_cmd = b.addSystemCommand(&.{ "bash", "./bench/run.sh" });
     run_cmd.addPassthruArgs();
     run_step.dependOn(&run_cmd.step);
 }
