@@ -119,7 +119,13 @@ jobs:
           else
             BINARY="bench_$(echo "$IMG" | tr '-' '_')"
             echo "file=frameworks/Dockerfile" >> "$GITHUB_OUTPUT"
-            echo "build_args=FRAMEWORK=$IMG,BINARY=$BINARY" >> "$GITHUB_OUTPUT"
+            # build-push-action splits build-args on newlines, not commas.
+            {
+              echo "build_args<<EOF"
+              echo "FRAMEWORK=$IMG"
+              echo "BINARY=$BINARY"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
           fi
 
       - name: Set up Docker Buildx
